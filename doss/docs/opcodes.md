@@ -2,11 +2,11 @@
 
 This page contains all the defined opcodes.
 
-| Opcode (hex)  | description |
+| Opcode  | description |
 | :------: | :----------- |
-| 0        | constant *false* |
+| 0        | noop (this is just ignored) |
 | 1        | constant *true*  |
-| 2        | constant *null*  |
+| 2        | constant *false*  |
 | 3        | signed varint value    |
 | 4        | decimal value    |
 | 5*       | float value      |
@@ -18,6 +18,8 @@ This page contains all the defined opcodes.
 | 11        | end Block        |
 | 12        | start array      |
 | 13        | end array        |
+| 14        | constant *null*  |
+| 15        | unsigned varint value |
 | 20       | set config   |
 | 21       | store next item in dict |
 | 22       | store next thing in dict but don't use as item |

@@ -4,7 +4,7 @@
 Processing data can be done in two different ways: dynamic schema and static schema. With a static schema the schema is known at compile time and translated into static data structures.
 With dynamic processing the schema is not known, sometimes does not exist. In this case the data is commonly represented as nested dictionaries.
 
-The most known format to save this nested dictionaries to a file is JSON. But JSON is rather *chatty* meaning it includes a lot of characters that include no information (like whitespaces) and duplicates chracters (like field names in every instance of an array). Basically the same is true for YAML.
+The most known format to save this nested dictionaries to a file is JSON. But JSON is rather *chatty* meaning it includes a lot of characters that include no information (like whitespaces) and duplicates characters (like field names in every instance of an array). Basically the same is true for YAML.
 
 DOSS is optimized for storing such dictionaries by keeping a dictionary of elements (strings, numbers, objects) in memory and reusing references to those entries while deserializing the data stream.
 
