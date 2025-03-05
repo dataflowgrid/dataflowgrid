@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = [
-    "doss/rust-lib", "jsonstream/rust-lib",
-    "pg-doss/extension"
-]
+    "doss/rust-lib", 
+    "streamablejson/rust-lib",
+    #"pg-doss/extension",
+    "shoutout"
+    , "commons/rust-lib"]

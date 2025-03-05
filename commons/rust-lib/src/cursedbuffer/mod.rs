@@ -1,0 +1,271 @@
+#![allow(dead_code)]
+#![allow(unused_imports)]
+use std::{clone, fs::read, future, ops::{Deref, DerefMut}, rc::Rc, sync::{Arc, Mutex, Weak}};
+use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
+
+
+//internal state structs
+
+enum Callback {
+    None,
+    Function(Box<dyn Fn()>)
+}
+
+impl Debug for Callback {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        match self {
+            Callback::None => write!(f, "None"),
+            Callback::Function(_) => write!(f, "Function")
+        }
+    }
+}
+#[derive(Debug)]
+struct CursedBufferInternalState<T> {
+    first_read_position: usize, //the first element's of the first slice of buffers position
+    buffers: Vec<Arc<Box<[T]>>>,
+    is_closed: bool,
+    all_readers: Vec<Option<CursedBufferReaderInternalState>>,
+    callback_function: Callback
+}
+
+#[derive(Debug)]
+struct CursedBufferReaderInternalState {
+    position: usize,
+}
+
+// public structs
+
+#[derive(Debug)]
+pub struct CursedBuffer<T> {
+    bufferstate: Arc<Mutex<CursedBufferInternalState<T>>>,
+}
+
+#[derive(Debug)]
+pub struct CursedBufferReader<T> {
+    bufferstate: Arc<Mutex<CursedBufferInternalState<T>>>,
+    reader_in_buffer: usize,
+}
+
+#[derive(Debug)]
+pub struct CursedChunk<T> {
+    slice: Arc<Box<[T]>>,
+    pos: usize
+}
+
+
+#[derive(Debug, PartialEq)]
+pub enum CursedBufferError {
+    NotEnoughData,
+    InvalidData,
+    IoError,
+    BufferClosed
+}
+
+// implementations
+
+impl<T> Clone for CursedBuffer<T> {
+    fn clone(&self) -> Self {
+        CursedBuffer {
+            bufferstate: self.bufferstate.clone()
+        }
+    }
+}
+
+impl<T> CursedBuffer<T> {
+    pub fn new() -> CursedBuffer<T> {
+        let state = CursedBufferInternalState::<T> {
+            first_read_position: 0,
+            buffers: Vec::new(),
+            all_readers: Vec::new(),
+            is_closed: false,
+            callback_function: Callback::None
+        };
+        let bufferstate = Arc::new(Mutex::new(state));
+        
+        CursedBuffer {
+            bufferstate
+        }
+    }
+
+    pub fn set_callback(&mut self, callback: Box<dyn Fn()>) {
+        let mut bufferstate = self.bufferstate.lock().unwrap();
+        bufferstate.callback_function = Callback::Function(callback);
+    }
+
+    pub fn close(&mut self) {
+        let mut bufferstate = self.bufferstate.lock().unwrap();
+        bufferstate.is_closed = true;
+    }
+
+    pub fn reader(&self, position: usize) -> CursedBufferReader<T> {
+        let mut bufferstate = self.bufferstate.lock().unwrap();
+
+        let readerstate = CursedBufferReaderInternalState {
+            position: position,
+        };
+
+        bufferstate.all_readers.push(Some(readerstate));
+
+        CursedBufferReader {
+            bufferstate: self.bufferstate.clone(),
+            reader_in_buffer: bufferstate.all_readers.len()-1
+        }
+    }
+
+    pub fn write(&self, data: Box<[T]>) -> Result<(), CursedBufferError> {
+        let mut s = self.bufferstate.lock().unwrap();
+        if s.is_closed {
+            return Err(CursedBufferError::BufferClosed);
+        }
+        s.buffers.push(Arc::new(data));
+        Ok(())
+    }
+}
+
+impl<T> CursedBufferInternalState<T> {
+    fn sync_reader_states(&mut self) {
+        //we basically look for the lowest position of all readers and whether we can therefor remove some buffers
+        let mut min_pos = usize::MAX;
+        for r in self.all_readers.iter() {
+            if let Some(r) = r {
+                if r.position < min_pos {
+                    min_pos = r.position;
+                }
+            }
+        }
+        let mut can_delete = min_pos - self.first_read_position;
+        let mut call = false;
+        while !self.buffers.is_empty() && self.buffers[0].len() <= can_delete {
+            can_delete -= self.buffers[0].len();
+            self.first_read_position += self.buffers[0].len();
+            self.buffers.remove(0);
+            call = true;
+        }
+        if let Callback::Function(callback) = &self.callback_function {
+            if call {
+                callback();
+            }
+        }
+}
+}
+
+impl<T> Drop for CursedBufferReader<T> {
+    fn drop(&mut self) {
+        let mut bufferstate = self.bufferstate.lock().unwrap();
+        bufferstate.all_readers[self.reader_in_buffer] = None;
+        bufferstate.sync_reader_states();
+    }
+}
+
+
+impl<T> CursedBufferReader<T> {
+    fn pos(&self) -> usize {
+        let bufferstate = self.bufferstate.lock().unwrap();
+        bufferstate.all_readers[self.reader_in_buffer].as_ref().unwrap().position
+    }
+
+    fn skip(&self, len:usize) {
+        let mut bufferstate = self.bufferstate.lock().unwrap();
+        bufferstate.all_readers[self.reader_in_buffer].as_mut().unwrap().position += len;
+        bufferstate.sync_reader_states();
+    }
+
+    fn next_chunk(&self) -> Result<CursedChunk<T>, CursedBufferError> {
+        let mut bufferstate = self.bufferstate.lock().unwrap();
+
+        //our own position is in internalstate.pos
+        //now we need to find the next buffer which holds that data
+        let internalstate = bufferstate.all_readers[self.reader_in_buffer].as_ref().unwrap();
+        let mut still_to_go = internalstate.position - bufferstate.first_read_position;
+
+        if bufferstate.buffers.len() == 0 {
+            return Err(CursedBufferError::NotEnoughData);
+        }
+
+        let mut i = 0;
+        while still_to_go >= bufferstate.buffers[i].len() {
+            still_to_go -= bufferstate.buffers[i].len();
+            i += 1;
+            if i >= bufferstate.buffers.len() {
+                return Err(CursedBufferError::NotEnoughData);
+            }
+        }
+
+        bufferstate.all_readers[self.reader_in_buffer].as_mut().unwrap().position += bufferstate.buffers[i].len();
+
+        let r = CursedChunk{
+            slice: bufferstate.buffers[i].clone(),
+            pos: still_to_go
+        };
+        bufferstate.sync_reader_states();
+        Ok(r)
+    }
+
+}
+
+
+impl<T> Deref for CursedChunk<T> {
+    type Target = [T];
+
+    fn deref(&self) -> &[T] {
+        self.as_slice()
+    }
+}
+
+impl<'a,T> CursedChunk<T> {
+    pub fn as_slice(&self) -> &[T] {
+        &self.slice.as_ref()[self.pos..]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::{OnceCell, RefCell};
+
+    use super::*;
+
+    #[test]
+    fn it_works() {
+        let b = CursedBuffer::<u8>::new();
+        b.write(Box::new([1, 2, 3, 4, 5]));
+        let r = b.reader(0);
+        let x = r.next_chunk();
+        println!("{:?}",x);
+        let x = r.next_chunk();
+        println!("{:?}",x);
+        b.write(Box::new([1, 2, 3]));
+        let x = r.next_chunk();
+        println!("{:?}",x);
+        b.write(Box::new([1, 2, 3, 4]));
+        r.skip(5);
+        b.write(Box::new([1, 2, 3, 5]));
+        let x = r.next_chunk();
+        println!("{:?}",x.unwrap().as_slice());
+        let x = r.next_chunk();
+        println!("{:?}",x);
+    }
+
+    #[test]
+    fn test_close() {
+        let mut b = CursedBuffer::<u8>::new();
+        b.write(Box::new([1, 2, 3, 4, 5])).expect("");
+        b.close();
+        b.write(Box::new([1, 2, 3, 4, 5])).expect_err("");
+    }
+
+    #[test]
+    fn test_callback() {
+        let mut b = CursedBuffer::<u8>::new();
+        let c = Arc::new(RefCell::<usize>::new(0));
+        let c2 = c.clone();
+        b.set_callback(Box::new(move || {
+            println!("Callback called");
+            c2.replace(1);
+        }));
+        let _ = b.write(Box::new([1, 2, 3, 4, 5]));
+        let r = b.reader(0);
+        let x = r.next_chunk();
+        println!("{:?}",x);
+        assert_eq!(c.take(), 1);
+    }
+}

@@ -36,6 +36,8 @@ A library to efficiently (de)serialize data which is represented as a dictionary
 
 - GridGateway - a gateway to distribute backend connections to several backends over one connection
 
+- ShoutOut - Transient data store to update other client with realtime information
+
 # Parsers
 
 - rosbag-flow

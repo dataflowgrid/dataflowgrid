@@ -1,3 +1,4 @@
+pub(crate) mod parser;
 
 pub struct JsonStreamReader {
 }
