@@ -1,6 +1,8 @@
+// This file is part of dataFlowGrid. See file LICENSE for full license details. (c) 2025 Alexander Zich
+
 #![allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
-enum JSONSReaderStateEnum {
+enum StreamableJSONReaderStateEnum {
     INIT{is_key: bool},
     OBJECT {is_key: bool},
     ARRAY,
@@ -10,7 +12,7 @@ enum JSONSReaderStateEnum {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum JSONSReaderEvent {
+pub enum StreamableJSONReaderEvent {
     StartObject,
     EndObject,
     StartArray,
@@ -26,20 +28,26 @@ pub enum JSONSReaderEvent {
 }
 
 #[derive(Debug)]
-pub enum JSONSReaderError {
+pub enum StreamableJSONReaderError {
     InvalidJSON,
     InvalidState,
+    CallbackError(Box<dyn Error>),
 }
 
-pub enum JSONSReaderCallbackReturn {
+#[derive(Debug)]
+pub enum StreamableJSONReaderCallbackReturn {
     Continue,
-    Stop,
+    SkipValue, //skip the value for this key
+    Skip, //skip the rest of this structure, whether it is an object or an array or type
+    StopOk, //stop parsing and return OK
+    StopErr(Box<dyn Error>), //stop parsing and return error
 }
 
 enum Callback<'a> {
     None,
-    Function(&'a dyn JSONSReaderCallback)
+    Function(&'a dyn StreamableJSONReaderCallback)
 }
+use std::error::Error;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::str::Chars;
 
@@ -54,29 +62,31 @@ impl<'a> Debug for Callback<'a> {
 
 
 
-pub trait JSONSReaderCallback {
-    fn on_jsons_event(&self, event: JSONSReaderEvent) -> JSONSReaderCallbackReturn;
+pub trait StreamableJSONReaderCallback {
+    fn on_streamablejson_event(&self, event: StreamableJSONReaderEvent) -> StreamableJSONReaderCallbackReturn;
 }
 
 #[derive(Debug)]
-pub struct JSONSReader<'a> {
+pub struct StreambleJSONReader<'a> {
     callback: Callback<'a>,
     chars: Vec<char>,
-    stack: Vec<JSONSReaderStateEnum>,
+    stack: Vec<StreamableJSONReaderStateEnum>,
 
     stringescape: bool,
     stringescapeunicode: bool,
     stringescapeunicodecount: u8,
     stringescapeunicodevalue: u32,
+
+    last_callback_return: StreamableJSONReaderCallbackReturn,
 }
 
-impl<'a> JSONSReader<'a> {
-    pub fn new(callback: &'a dyn JSONSReaderCallback) -> JSONSReader<'a> {   
+impl<'a> StreambleJSONReader<'a> {
+    pub fn new(callback: &'a dyn StreamableJSONReaderCallback) -> StreambleJSONReader<'a> {   
         let mut stack = Vec::new();
-        stack.push(JSONSReaderStateEnum::INIT{is_key: false});
+        stack.push(StreamableJSONReaderStateEnum::INIT{is_key: false});
 
-        callback.on_jsons_event(JSONSReaderEvent::Initialized);
-        JSONSReader {
+        let r = callback.on_streamablejson_event(StreamableJSONReaderEvent::Initialized);
+        StreambleJSONReader {
             callback: Callback::Function(callback),
             chars: Vec::new(),
             stack,
@@ -84,21 +94,29 @@ impl<'a> JSONSReader<'a> {
             stringescapeunicode: false,
             stringescapeunicodecount: 0,
             stringescapeunicodevalue: 0,
+            last_callback_return: r,
         }
     }
 
-    fn callback(&mut self, event: JSONSReaderEvent) -> JSONSReaderCallbackReturn {
-        match &self.callback {
-            Callback::Function(f) => f.on_jsons_event(event),
-            Callback::None => JSONSReaderCallbackReturn::Continue,
+    fn callback(&mut self, event: StreamableJSONReaderEvent) {
+        self.last_callback_return = match &self.callback {
+            Callback::Function(f) => f.on_streamablejson_event(event),
+            Callback::None => StreamableJSONReaderCallbackReturn::Continue,
         }
     }
 
-    pub fn pushdata(&mut self, data: Chars) -> Result<(), JSONSReaderError> {
+    pub fn pushdata(&mut self, data: Chars) -> Result<(), StreamableJSONReaderError> {
         let mut iter = data.into_iter();
         let mut reprocess_char = false;
         let mut c = ' ';
         loop {
+            let e = std::mem::replace(&mut self.last_callback_return, StreamableJSONReaderCallbackReturn::Continue);
+            if let StreamableJSONReaderCallbackReturn::StopErr(e) = e {
+                return Err(StreamableJSONReaderError::CallbackError(e));
+            }
+            if let StreamableJSONReaderCallbackReturn::StopOk = e {
+                return Ok(());
+            }
             if !reprocess_char {
                 match iter.next() {
                     Some(ch) => {
@@ -112,25 +130,25 @@ impl<'a> JSONSReader<'a> {
             reprocess_char = false;
             println!("{:?}",c);
             if self.stack.is_empty() {
-                return Err(JSONSReaderError::InvalidState);
+                return Err(StreamableJSONReaderError::InvalidState);
             }
             match self.stack.last().unwrap().clone() {
-                JSONSReaderStateEnum::INIT{is_key} => {
+                StreamableJSONReaderStateEnum::INIT{is_key} => {
                     if c.is_whitespace() {
                         continue;
                     }
                     match c {
                         '{' => {
-                            self.stack.push(JSONSReaderStateEnum::OBJECT {is_key: true});
-                            self.callback(JSONSReaderEvent::StartObject);
+                            self.stack.push(StreamableJSONReaderStateEnum::OBJECT {is_key: true});
+                            self.callback(StreamableJSONReaderEvent::StartObject);
                         }
                         '[' => {
-                            self.stack.push(JSONSReaderStateEnum::ARRAY);
-                            self.stack.push(JSONSReaderStateEnum::INIT{is_key});
-                            self.callback(JSONSReaderEvent::StartArray);
+                            self.stack.push(StreamableJSONReaderStateEnum::ARRAY);
+                            self.stack.push(StreamableJSONReaderStateEnum::INIT{is_key});
+                            self.callback(StreamableJSONReaderEvent::StartArray);
                         }
                         '"' => {
-                            self.stack.push(JSONSReaderStateEnum::STRING{is_key});
+                            self.stack.push(StreamableJSONReaderStateEnum::STRING{is_key});
                             self.chars.clear();
                         }
                         ')'|']'|'}'|','|':' => {
@@ -141,55 +159,55 @@ impl<'a> JSONSReader<'a> {
                         }
                         _ => {
                             if c.is_alphanumeric() {
-                                self.stack.push(JSONSReaderStateEnum::CONSTANT{is_key});
+                                self.stack.push(StreamableJSONReaderStateEnum::CONSTANT{is_key});
                                 self.chars.push(c);
                             } else {
-                                return Err(JSONSReaderError::InvalidJSON);
+                                return Err(StreamableJSONReaderError::InvalidJSON);
                             }
                         }
                     }
                 }
-                JSONSReaderStateEnum::OBJECT{is_key} => {
+                StreamableJSONReaderStateEnum::OBJECT{is_key} => {
                     match c {
                         '}' => {
                             self.stack.pop().unwrap();
-                            self.callback(JSONSReaderEvent::EndObject);
+                            self.callback(StreamableJSONReaderEvent::EndObject);
                         }
                         ':'  => {
                             if is_key {
                                 self.stack.pop().unwrap();
-                                self.stack.push(JSONSReaderStateEnum::OBJECT{is_key: false});
-                                self.stack.push(JSONSReaderStateEnum::INIT{is_key: false});
+                                self.stack.push(StreamableJSONReaderStateEnum::OBJECT{is_key: false});
+                                self.stack.push(StreamableJSONReaderStateEnum::INIT{is_key: false});
                             } else {
-                                self.stack.push(JSONSReaderStateEnum::INIT{is_key: false});
+                                self.stack.push(StreamableJSONReaderStateEnum::INIT{is_key: false});
                             }
                             self.chars.clear();
                         }
                         ',' => {
-                            self.stack.push(JSONSReaderStateEnum::INIT{is_key:true});
+                            self.stack.push(StreamableJSONReaderStateEnum::INIT{is_key:true});
                         }
                         _ => {
                             if c.is_whitespace() {
                                 continue;
                             }
                             if c == '"' {
-                                self.stack.push(JSONSReaderStateEnum::STRING{is_key});
+                                self.stack.push(StreamableJSONReaderStateEnum::STRING{is_key});
                                 self.chars.clear();
                             } else {
                                 self.chars.push(c);
-                                self.stack.push(JSONSReaderStateEnum::CONSTANT {is_key});
+                                self.stack.push(StreamableJSONReaderStateEnum::CONSTANT {is_key});
                             }
                         }
                     }
                 }
-                JSONSReaderStateEnum::ARRAY => {
+                StreamableJSONReaderStateEnum::ARRAY => {
                     match c {
                         ']' => {
                             self.stack.pop().unwrap();
-                            self.callback(JSONSReaderEvent::EndArray);
+                            self.callback(StreamableJSONReaderEvent::EndArray);
                         }
                         ',' => {
-                            self.stack.push(JSONSReaderStateEnum::INIT{is_key: false});
+                            self.stack.push(StreamableJSONReaderStateEnum::INIT{is_key: false});
                         }
                         _ => {
                             if c.is_whitespace() {
@@ -197,14 +215,14 @@ impl<'a> JSONSReader<'a> {
                             }
                             if c == '"' {
                                 self.stack.pop().unwrap();
-                                self.callback(JSONSReaderEvent::String(String::from_iter(&self.chars)));
+                                self.callback(StreamableJSONReaderEvent::String(String::from_iter(&self.chars)));
                             } else {
-                                return Err(JSONSReaderError::InvalidJSON);
+                                return Err(StreamableJSONReaderError::InvalidJSON);
                             }
                         }
                     }
                 }
-                JSONSReaderStateEnum::STRING{..} => {
+                StreamableJSONReaderStateEnum::STRING{..} => {
                     if self.stringescape {
                         if self.stringescapeunicode {
                             if self.stringescapeunicodecount < 4 {
@@ -213,7 +231,7 @@ impl<'a> JSONSReader<'a> {
                                     self.stringescapeunicodecount += 1;
                                     continue;
                                 } else {
-                                    return Err(JSONSReaderError::InvalidJSON);
+                                    return Err(StreamableJSONReaderError::InvalidJSON);
                                 }
                             } else {
                                 self.chars.push(std::char::from_u32(self.stringescapeunicodevalue).unwrap());
@@ -259,7 +277,7 @@ impl<'a> JSONSReader<'a> {
                                     self.stringescapeunicode = true;
                                 }
                                 _ => {
-                                    return Err(JSONSReaderError::InvalidJSON);
+                                    return Err(StreamableJSONReaderError::InvalidJSON);
                                 }
                             }
                         }
@@ -268,7 +286,7 @@ impl<'a> JSONSReader<'a> {
                             self.stringescape = true;
                         } else {
                             if c == '"' {
-                                self.callback(JSONSReaderEvent::String(String::from_iter(&self.chars)));
+                                self.callback(StreamableJSONReaderEvent::String(String::from_iter(&self.chars)));
                                 self.stack.pop().unwrap();
                             } else {
                                 self.chars.push(c);
@@ -276,28 +294,28 @@ impl<'a> JSONSReader<'a> {
                         }
                     }
                 }
-                JSONSReaderStateEnum::CONSTANT{is_key} => {
+                StreamableJSONReaderStateEnum::CONSTANT{is_key} => {
                     if c.is_alphanumeric() {
                         self.chars.push(c);
                     } else if c == '(' {
                         self.stack.pop().unwrap();
-                        self.stack.push(JSONSReaderStateEnum::TYPE);
-                        self.stack.push(JSONSReaderStateEnum::INIT{is_key});
-                        self.callback(JSONSReaderEvent::StartType(String::from_iter(&self.chars)));
+                        self.stack.push(StreamableJSONReaderStateEnum::TYPE);
+                        self.stack.push(StreamableJSONReaderStateEnum::INIT{is_key});
+                        self.callback(StreamableJSONReaderEvent::StartType(String::from_iter(&self.chars)));
                         self.chars.clear();
                     } else {
-                        self.callback(JSONSReaderEvent::Constant(String::from_iter(&self.chars)));
+                        self.callback(StreamableJSONReaderEvent::Constant(String::from_iter(&self.chars)));
                         self.stack.pop().unwrap();
                         reprocess_char = true;
                         self.chars.clear();
                     }
                 }
-                JSONSReaderStateEnum::TYPE => {
+                StreamableJSONReaderStateEnum::TYPE => {
                     if c == ')' {
                         self.stack.pop().unwrap();
-                        self.callback(JSONSReaderEvent::EndType);
+                        self.callback(StreamableJSONReaderEvent::EndType);
                     } else {
-                        self.callback(JSONSReaderEvent::Constant(String::from_iter(&self.chars)));
+                        self.callback(StreamableJSONReaderEvent::Constant(String::from_iter(&self.chars)));
                         self.chars.clear();
                         self.stack.pop().unwrap();
                         reprocess_char = true;
@@ -308,40 +326,173 @@ impl<'a> JSONSReader<'a> {
     
     }
 
-    pub fn finish(&mut self) -> Result<(), JSONSReaderError> {
+    pub fn finish(&mut self) -> Result<(), StreamableJSONReaderError> {
         if self.stack.is_empty() {
-            return Err(JSONSReaderError::InvalidState);
+            return Err(StreamableJSONReaderError::InvalidState);
         }
         match self.stack.pop().unwrap() {
-            JSONSReaderStateEnum::INIT{..} => {
+            StreamableJSONReaderStateEnum::INIT{..} => {
             }
-            JSONSReaderStateEnum::OBJECT { .. } => {
-                return Err(JSONSReaderError::InvalidJSON);
+            StreamableJSONReaderStateEnum::OBJECT { .. } => {
+                return Err(StreamableJSONReaderError::InvalidJSON);
             }
-            JSONSReaderStateEnum::ARRAY => {
-                return Err(JSONSReaderError::InvalidJSON);
+            StreamableJSONReaderStateEnum::ARRAY => {
+                return Err(StreamableJSONReaderError::InvalidJSON);
             }
-            JSONSReaderStateEnum::STRING{..} => {
-                return Err(JSONSReaderError::InvalidJSON);
+            StreamableJSONReaderStateEnum::STRING{..} => {
+                return Err(StreamableJSONReaderError::InvalidJSON);
             }
-            JSONSReaderStateEnum::CONSTANT{is_key} => {
+            StreamableJSONReaderStateEnum::CONSTANT{is_key} => {
                 if !is_key {
-                    self.callback(JSONSReaderEvent::Constant(String::from_iter(&self.chars)));
+                    self.callback(StreamableJSONReaderEvent::Constant(String::from_iter(&self.chars)));
                 } else {
-                    return Err(JSONSReaderError::InvalidJSON);
+                    return Err(StreamableJSONReaderError::InvalidJSON);
                 }
             }
-            JSONSReaderStateEnum::TYPE => {
-                return Err(JSONSReaderError::InvalidJSON);
+            StreamableJSONReaderStateEnum::TYPE => {
+                return Err(StreamableJSONReaderError::InvalidJSON);
             }
         }
         if self.stack.len() >1 {
-            return Err(JSONSReaderError::InvalidState);
+            return Err(StreamableJSONReaderError::InvalidState);
         }
-        self.callback(JSONSReaderEvent::Finished);
+        self.callback(StreamableJSONReaderEvent::Finished);
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod tests2 {
+    use super::*;
+    use std::cell::RefCell;
+
+    struct TestCallback {
+        result: RefCell<Vec<StreamableJSONReaderCallbackReturn>>,
+        events: RefCell<Vec<StreamableJSONReaderEvent>>,
+    }
+    
+    impl StreamableJSONReaderCallback for TestCallback {
+        fn on_streamablejson_event(&self, event: StreamableJSONReaderEvent) -> StreamableJSONReaderCallbackReturn {
+            println!("{:?}", event);
+            self.events.borrow_mut().push(event);
+            self.result.borrow_mut().pop().unwrap()
+        }
+    }
+    
+    #[test]
+    fn test_continue() {
+        let b = "{}";
+        let c = Box::new(TestCallback { 
+            result: RefCell::new(
+                vec![
+                    StreamableJSONReaderCallbackReturn::Continue,
+                    StreamableJSONReaderCallbackReturn::Continue,
+                    StreamableJSONReaderCallbackReturn::Continue,
+                    StreamableJSONReaderCallbackReturn::Continue,
+                ]
+            ),
+            events: RefCell::new(Vec::new()) 
+        });
+    
+        let mut reader = StreambleJSONReader::new(c.as_ref());
+    
+        reader.pushdata(b.chars()).unwrap();
+        reader.finish().unwrap();
+        let mut events = c.events.borrow_mut();
+    
+        //as no finish was called, wo don't get the finished event
+        assert_eq!(events.pop().unwrap(), StreamableJSONReaderEvent::Finished);
+        assert_eq!(events.pop().unwrap(), StreamableJSONReaderEvent::EndObject);
+        assert_eq!(events.pop().unwrap(), StreamableJSONReaderEvent::StartObject);
+        assert_eq!(events.pop().unwrap(), StreamableJSONReaderEvent::Initialized);
+        assert!(events.pop().is_none());
+    }
+
+    #[test]
+    fn test_stopok() {
+        let b = "{}";
+        let c = Box::new(TestCallback { 
+            result: RefCell::new(
+                vec![
+                    StreamableJSONReaderCallbackReturn::Continue,
+                    StreamableJSONReaderCallbackReturn::StopOk,
+                ]
+            ),
+            events: RefCell::new(Vec::new()) 
+        });
+    
+        let mut reader = StreambleJSONReader::new(c.as_ref());
+    
+        reader.pushdata(b.chars()).unwrap();
+        reader.finish().unwrap(); //finish works because we never nested into any object
+        let mut events = c.events.borrow_mut();
+    
+        //as no finish was called, wo don't get the finished event
+        assert_eq!(events.pop().unwrap(), StreamableJSONReaderEvent::Finished);
+        assert_eq!(events.pop().unwrap(), StreamableJSONReaderEvent::Initialized);
+        assert!(events.pop().is_none());
+    }
+
+    #[test]
+    fn test_stopok2() {
+        let b = "{}";
+        let c = Box::new(TestCallback { 
+            result: RefCell::new(
+                vec![
+                    StreamableJSONReaderCallbackReturn::Continue,
+                    StreamableJSONReaderCallbackReturn::StopOk,
+                    StreamableJSONReaderCallbackReturn::Continue,
+                ]
+            ),
+            events: RefCell::new(Vec::new()) 
+        });
+    
+        let mut reader = StreambleJSONReader::new(c.as_ref());
+    
+        reader.pushdata(b.chars()).unwrap();
+        reader.finish().expect_err("we were in the middle of an object");
+        let mut events = c.events.borrow_mut();
+    
+        //as no finish was called, wo don't get the finished event
+        assert_eq!(events.pop().unwrap(), StreamableJSONReaderEvent::StartObject);
+        assert_eq!(events.pop().unwrap(), StreamableJSONReaderEvent::Initialized);
+        assert!(events.pop().is_none());
+    }
+
+    #[test]
+    fn test_stoperr() {
+        let b = "{}";
+        let c = Box::new(TestCallback { 
+            result: RefCell::new(
+                vec![
+                    StreamableJSONReaderCallbackReturn::Continue,
+                    StreamableJSONReaderCallbackReturn::StopErr(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "test"))),
+                    StreamableJSONReaderCallbackReturn::Continue,
+                ]
+            ),
+            events: RefCell::new(Vec::new()) 
+        });
+    
+        let mut reader = StreambleJSONReader::new(c.as_ref());
+    
+        let err = reader.pushdata(b.chars()).expect_err("we generated this error");
+        if let StreamableJSONReaderError::CallbackError(err) = err {
+            let err = err.as_ref();
+            assert!(err.is::<std::io::Error>());
+        } else {
+            panic!("wrong error type");
+        }
+        reader.finish().expect_err("we were in the middle of an object");
+        let mut events = c.events.borrow_mut();
+    
+        //as no finish was called, wo don't get the finished event
+        assert_eq!(events.pop().unwrap(), StreamableJSONReaderEvent::StartObject);
+        assert_eq!(events.pop().unwrap(), StreamableJSONReaderEvent::Initialized);
+        assert!(events.pop().is_none());
+    }
+
+
+}
