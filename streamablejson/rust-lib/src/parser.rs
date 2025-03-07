@@ -1,26 +1,26 @@
 #![allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 enum JSONSReaderStateEnum {
-    INIT,
+    INIT{is_key: bool},
     OBJECT {is_key: bool},
     ARRAY,
-    STRING(bool),
-    CONSTANT(bool), //true, false, number, null, object
+    STRING{is_key: bool},
+    CONSTANT{is_key: bool}, //true, false, number, null, object
     TYPE,
 }
 
 #[derive(Debug, PartialEq)]
 pub enum JSONSReaderEvent {
-    ValueStartObject,
-    ValueEndObject,
-    ValueStartArray,
-    ValueEndArray,
-    StringKey(String),
-    ConstantKey(String),
-    StringValue(String),
-    ConstantValue(String),
-    ValueStartType(String),
-    ValueEndType,
+    StartObject,
+    EndObject,
+    StartArray,
+    EndArray,
+    String(String),
+    Constant(String),
+    MarkerKey,
+    MarkerValue,
+    StartType(String),
+    EndType,
     Finished,
     Initialized
 }
@@ -73,7 +73,7 @@ pub struct JSONSReader<'a> {
 impl<'a> JSONSReader<'a> {
     pub fn new(callback: &'a dyn JSONSReaderCallback) -> JSONSReader<'a> {   
         let mut stack = Vec::new();
-        stack.push(JSONSReaderStateEnum::INIT);
+        stack.push(JSONSReaderStateEnum::INIT{is_key: false});
 
         callback.on_jsons_event(JSONSReaderEvent::Initialized);
         JSONSReader {
@@ -111,33 +111,37 @@ impl<'a> JSONSReader<'a> {
             }
             reprocess_char = false;
             println!("{:?}",c);
-            match self.stack.last().unwrap() {
-                JSONSReaderStateEnum::INIT => {
+            if self.stack.is_empty() {
+                return Err(JSONSReaderError::InvalidState);
+            }
+            match self.stack.last().unwrap().clone() {
+                JSONSReaderStateEnum::INIT{is_key} => {
                     if c.is_whitespace() {
                         continue;
                     }
                     match c {
                         '{' => {
                             self.stack.push(JSONSReaderStateEnum::OBJECT {is_key: true});
-                            self.callback(JSONSReaderEvent::ValueStartObject);
+                            self.callback(JSONSReaderEvent::StartObject);
                         }
                         '[' => {
                             self.stack.push(JSONSReaderStateEnum::ARRAY);
-                            self.stack.push(JSONSReaderStateEnum::INIT);
-                            self.callback(JSONSReaderEvent::ValueStartArray);
+                            self.stack.push(JSONSReaderStateEnum::INIT{is_key});
+                            self.callback(JSONSReaderEvent::StartArray);
                         }
                         '"' => {
-                            self.stack.push(JSONSReaderStateEnum::STRING(false));
+                            self.stack.push(JSONSReaderStateEnum::STRING{is_key});
                             self.chars.clear();
                         }
-                        ')'|']'|'}'|',' => {
+                        ')'|']'|'}'|','|':' => {
                             //loks like the end of a type
                             reprocess_char = true;
                             self.stack.pop().unwrap();
+                            self.chars.clear();
                         }
                         _ => {
                             if c.is_alphanumeric() {
-                                self.stack.push(JSONSReaderStateEnum::CONSTANT(false));
+                                self.stack.push(JSONSReaderStateEnum::CONSTANT{is_key});
                                 self.chars.push(c);
                             } else {
                                 return Err(JSONSReaderError::InvalidJSON);
@@ -149,27 +153,31 @@ impl<'a> JSONSReader<'a> {
                     match c {
                         '}' => {
                             self.stack.pop().unwrap();
-                            self.callback(JSONSReaderEvent::ValueEndObject);
+                            self.callback(JSONSReaderEvent::EndObject);
                         }
                         ':'  => {
-                            if *is_key {
-                                self.stack.push(JSONSReaderStateEnum::INIT);
+                            if is_key {
+                                self.stack.pop().unwrap();
+                                self.stack.push(JSONSReaderStateEnum::OBJECT{is_key: false});
+                                self.stack.push(JSONSReaderStateEnum::INIT{is_key: false});
                             } else {
-                                return Err(JSONSReaderError::InvalidJSON);
+                                self.stack.push(JSONSReaderStateEnum::INIT{is_key: false});
                             }
+                            self.chars.clear();
                         }
                         ',' => {
-                            self.stack.push(JSONSReaderStateEnum::INIT);
+                            self.stack.push(JSONSReaderStateEnum::INIT{is_key:true});
                         }
                         _ => {
                             if c.is_whitespace() {
                                 continue;
                             }
                             if c == '"' {
-                                self.stack.push(JSONSReaderStateEnum::STRING(true));
+                                self.stack.push(JSONSReaderStateEnum::STRING{is_key});
                                 self.chars.clear();
                             } else {
-                                return Err(JSONSReaderError::InvalidJSON);
+                                self.chars.push(c);
+                                self.stack.push(JSONSReaderStateEnum::CONSTANT {is_key});
                             }
                         }
                     }
@@ -178,10 +186,10 @@ impl<'a> JSONSReader<'a> {
                     match c {
                         ']' => {
                             self.stack.pop().unwrap();
-                            self.callback(JSONSReaderEvent::ValueEndArray);
+                            self.callback(JSONSReaderEvent::EndArray);
                         }
                         ',' => {
-                            self.stack.push(JSONSReaderStateEnum::INIT);
+                            self.stack.push(JSONSReaderStateEnum::INIT{is_key: false});
                         }
                         _ => {
                             if c.is_whitespace() {
@@ -189,14 +197,14 @@ impl<'a> JSONSReader<'a> {
                             }
                             if c == '"' {
                                 self.stack.pop().unwrap();
-                                self.callback(JSONSReaderEvent::StringValue(String::from_iter(&self.chars)));
+                                self.callback(JSONSReaderEvent::String(String::from_iter(&self.chars)));
                             } else {
                                 return Err(JSONSReaderError::InvalidJSON);
                             }
                         }
                     }
                 }
-                JSONSReaderStateEnum::STRING(is_key) => {
+                JSONSReaderStateEnum::STRING{..} => {
                     if self.stringescape {
                         if self.stringescapeunicode {
                             if self.stringescapeunicodecount < 4 {
@@ -260,11 +268,7 @@ impl<'a> JSONSReader<'a> {
                             self.stringescape = true;
                         } else {
                             if c == '"' {
-                                if *is_key {
-                                       self.callback(JSONSReaderEvent::StringKey(String::from_iter(&self.chars)));
-                                } else {
-                                    self.callback(JSONSReaderEvent::StringValue(String::from_iter(&self.chars)));
-                                }                                    
+                                self.callback(JSONSReaderEvent::String(String::from_iter(&self.chars)));
                                 self.stack.pop().unwrap();
                             } else {
                                 self.chars.push(c);
@@ -272,30 +276,28 @@ impl<'a> JSONSReader<'a> {
                         }
                     }
                 }
-                JSONSReaderStateEnum::CONSTANT(is_key) => {
+                JSONSReaderStateEnum::CONSTANT{is_key} => {
                     if c.is_alphanumeric() {
                         self.chars.push(c);
                     } else if c == '(' {
                         self.stack.pop().unwrap();
                         self.stack.push(JSONSReaderStateEnum::TYPE);
-                        self.stack.push(JSONSReaderStateEnum::INIT);
-                        self.callback(JSONSReaderEvent::ValueStartType(String::from_iter(&self.chars)));
+                        self.stack.push(JSONSReaderStateEnum::INIT{is_key});
+                        self.callback(JSONSReaderEvent::StartType(String::from_iter(&self.chars)));
+                        self.chars.clear();
                     } else {
-                        if *is_key {
-                            self.callback(JSONSReaderEvent::StringKey(String::from_iter(&self.chars)));
-                        } else {
-                            self.callback(JSONSReaderEvent::ConstantKey(String::from_iter(&self.chars)));
-                        }
+                        self.callback(JSONSReaderEvent::Constant(String::from_iter(&self.chars)));
                         self.stack.pop().unwrap();
                         reprocess_char = true;
+                        self.chars.clear();
                     }
                 }
                 JSONSReaderStateEnum::TYPE => {
                     if c == ')' {
                         self.stack.pop().unwrap();
-                        self.callback(JSONSReaderEvent::ValueEndType);
+                        self.callback(JSONSReaderEvent::EndType);
                     } else {
-                        self.callback(JSONSReaderEvent::ConstantValue(String::from_iter(&self.chars)));
+                        self.callback(JSONSReaderEvent::Constant(String::from_iter(&self.chars)));
                         self.chars.clear();
                         self.stack.pop().unwrap();
                         reprocess_char = true;
@@ -307,8 +309,11 @@ impl<'a> JSONSReader<'a> {
     }
 
     pub fn finish(&mut self) -> Result<(), JSONSReaderError> {
-        match self.stack.last().unwrap() {
-            JSONSReaderStateEnum::INIT => {
+        if self.stack.is_empty() {
+            return Err(JSONSReaderError::InvalidState);
+        }
+        match self.stack.pop().unwrap() {
+            JSONSReaderStateEnum::INIT{..} => {
             }
             JSONSReaderStateEnum::OBJECT { .. } => {
                 return Err(JSONSReaderError::InvalidJSON);
@@ -316,15 +321,22 @@ impl<'a> JSONSReader<'a> {
             JSONSReaderStateEnum::ARRAY => {
                 return Err(JSONSReaderError::InvalidJSON);
             }
-            JSONSReaderStateEnum::STRING(_) => {
+            JSONSReaderStateEnum::STRING{..} => {
                 return Err(JSONSReaderError::InvalidJSON);
             }
-            JSONSReaderStateEnum::CONSTANT(_) => {
-                self.callback(JSONSReaderEvent::ConstantValue(String::from_iter(&self.chars)));
+            JSONSReaderStateEnum::CONSTANT{is_key} => {
+                if !is_key {
+                    self.callback(JSONSReaderEvent::Constant(String::from_iter(&self.chars)));
+                } else {
+                    return Err(JSONSReaderError::InvalidJSON);
+                }
             }
             JSONSReaderStateEnum::TYPE => {
                 return Err(JSONSReaderError::InvalidJSON);
             }
+        }
+        if self.stack.len() >1 {
+            return Err(JSONSReaderError::InvalidState);
         }
         self.callback(JSONSReaderEvent::Finished);
         Ok(())
@@ -332,256 +344,4 @@ impl<'a> JSONSReader<'a> {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::cell::RefCell;
-
-    use super::*;
-
-    struct TestCallback {
-        events: RefCell<Vec<JSONSReaderEvent>>,
-    }
-
-    impl JSONSReaderCallback for TestCallback {
-        fn on_jsons_event(&self, event: JSONSReaderEvent) -> JSONSReaderCallbackReturn {
-            println!("{:?}", event);
-            self.events.borrow_mut().push(event);
-            JSONSReaderCallbackReturn::Continue
-        }
-    }
-
-    #[test]
-    fn test_entities() {
-        let b = "true ";
-        let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-
-        let mut reader = JSONSReader::new(c.as_ref());
-
-        reader.pushdata(b.chars()).unwrap();
-        assert_eq!(c.events.borrow().len(), 1);
-    }
-
-
-    #[test]
-    fn test_string1() {
-        let b = " \"test\" ";
-        let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-
-        let mut reader = JSONSReader::new(c.as_ref());
-
-        reader.pushdata(b.chars()).unwrap();
-        reader.finish().unwrap();
-
-        let events = c.events.borrow();
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[0], JSONSReaderEvent::StringValue(String::from("test")));
-        assert_eq!(events[1], JSONSReaderEvent::Finished);
-    }
-
-    #[test]
-    fn test_unicodeescape() {
-        let b = " \"test\\\"\\u0008\\u000c\\n\\r\\t\\\\\"";
-        let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-
-        let mut reader = JSONSReader::new(c.as_ref());
-
-        reader.pushdata(b.chars()).unwrap();
-        reader.finish().unwrap();
-
-        let events = c.events.borrow();
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[0], JSONSReaderEvent::StringValue(String::from("test\"\u{0008}\u{000c}\n\r\t\\")));
-        assert_eq!(events[1], JSONSReaderEvent::Finished);
-    }
-
-    #[test]
-    fn test_constant() {
-        let b = " test";
-        let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-
-        let mut reader = JSONSReader::new(c.as_ref());
-
-        reader.pushdata(b.chars()).unwrap();
-        reader.finish().unwrap();
-
-        let events = c.events.borrow();
-        assert_eq!(events.len(), 2);                                                             
-        assert_eq!(events[0], JSONSReaderEvent::ConstantValue(String::from("test")));
-        assert_eq!(events[1], JSONSReaderEvent::Finished);
-    }
-
-    #[test]
-    fn test_invalid_constant() {
-        let b = " test";
-        let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-
-        let mut reader = JSONSReader::new(c.as_ref());
-
-        reader.pushdata(b.chars()).unwrap();
-        reader.pushdata(":2".chars()).expect_err("this should fail because not inside of object");
-        reader.finish().unwrap();
-
-        let events = c.events.borrow();
-        assert_eq!(events.len(), 2);                                                             
-        assert_eq!(events[0], JSONSReaderEvent::ConstantValue(String::from("test")));
-        assert_eq!(events[1], JSONSReaderEvent::Finished);
-    }
-
-
-    #[test]
-    fn test_type() {
-        let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-        let mut reader = JSONSReader::new(c.as_ref());
-
-        reader.pushdata("test()".chars()).unwrap();
-        reader.finish().unwrap();
-
-        let events = c.events.borrow();
-        assert_eq!(events.len(), 3);                                                             
-        assert_eq!(events[0], JSONSReaderEvent::ValueStartType(String::from("test")));
-        assert_eq!(events[1], JSONSReaderEvent::ValueEndType);
-        assert_eq!(events[2], JSONSReaderEvent::Finished);
-    }
-
-
-    #[test]
-    fn test_type_with_string() {
-        let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-        let mut reader = JSONSReader::new(c.as_ref());
-
-        reader.pushdata("test(\"string\")".chars()).unwrap();
-        reader.finish().unwrap();
-
-        let events = c.events.borrow();
-        assert_eq!(events.len(), 4);                                                             
-        assert_eq!(events[0], JSONSReaderEvent::ValueStartType(String::from("test")));
-        assert_eq!(events[1], JSONSReaderEvent::StringValue(String::from("string")));
-        assert_eq!(events[2], JSONSReaderEvent::ValueEndType);
-        assert_eq!(events[3], JSONSReaderEvent::Finished);
-    }
-
-    #[test]
-    fn test_empty_array() {
-        let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-        let mut reader = JSONSReader::new(c.as_ref());
-
-        reader.pushdata("[]".chars()).unwrap();
-        reader.finish().unwrap();
-
-        let events = c.events.borrow();
-        assert_eq!(events.len(), 3);                                                             
-        assert_eq!(events[0], JSONSReaderEvent::ValueStartArray);
-        assert_eq!(events[1], JSONSReaderEvent::ValueEndArray);
-        assert_eq!(events[2], JSONSReaderEvent::Finished);
-    }
-
-    #[test]
-    fn test_array_with_numbers() {
-        let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-        let mut reader = JSONSReader::new(c.as_ref());
-
-        reader.pushdata("[1,2]".chars()).unwrap();
-        reader.finish().unwrap();
-
-        let mut events = c.events.borrow_mut();
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::Finished);
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::ValueEndArray);
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::ConstantValue(String::from("2")));
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::ConstantValue(String::from("1")));
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::ValueStartArray);
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::Initialized);
-        assert!(events.pop().is_none());
-    }
-
-    #[test]
-    fn test_array_with_strings() {
-        let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-        let mut reader = JSONSReader::new(c.as_ref());
-
-        reader.pushdata("[\"abc\",\"def\"]".chars()).unwrap();
-        reader.finish().unwrap();
-
-        let mut events = c.events.borrow_mut();
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::Finished);
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::ValueEndArray);
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::StringValue(String::from("def")));
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::StringValue(String::from("abc")));
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::ValueStartArray);
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::Initialized);
-        assert!(events.pop().is_none());
-    }
-
-    #[test]
-    fn test_array_with_numbers_and_strings() {
-        let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-        let mut reader = JSONSReader::new(c.as_ref());
-
-        reader.pushdata("[\"abc\", 1,\"def\" ,2]".chars()).unwrap();
-        reader.finish().unwrap();
-
-        let mut events = c.events.borrow_mut();
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::Finished);
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::ValueEndArray);
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::ConstantValue(String::from("2")));
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::StringValue(String::from("def")));
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::ConstantValue(String::from("1")));
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::StringValue(String::from("abc")));
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::ValueStartArray);
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::Initialized);
-        assert!(events.pop().is_none());
-    }
-
-    #[test]
-    fn test_empty_object() {
-        let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-        let mut reader = JSONSReader::new(c.as_ref());
-
-        reader.pushdata("{}".chars()).unwrap();
-        reader.finish().unwrap();
-
-        let mut events = c.events.borrow_mut();
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::Finished);
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::ValueEndObject);
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::ValueStartObject);
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::Initialized);
-        assert!(events.pop().is_none());
-    }
-
-    #[test]
-    fn test_object() {
-        let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-        let mut reader = JSONSReader::new(c.as_ref());
-
-        reader.pushdata("{\"abc\":\"def\"}".chars()).unwrap();
-        reader.finish().unwrap();
-
-        let mut events = c.events.borrow_mut();
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::Finished);
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::ValueEndObject);
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::StringValue(String::from("def")));
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::StringKey(String::from("abc")));
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::ValueStartObject);
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::Initialized);
-        assert!(events.pop().is_none());
-    }
-
-    #[test]
-    fn test_object2() {
-        let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-        let mut reader = JSONSReader::new(c.as_ref());
-
-        reader.pushdata("{\"abc\":\"def\", 1: 2}".chars()).unwrap();
-        reader.finish().unwrap();
-
-        let mut events = c.events.borrow_mut();
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::Finished);
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::ValueEndObject);
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::ConstantValue(String::from("2")));
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::ConstantKey(String::from("1")));
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::StringValue(String::from("def")));
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::StringKey(String::from("abc")));
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::ValueStartObject);
-        assert_eq!(events.pop().unwrap(), JSONSReaderEvent::Initialized);
-        assert!(events.pop().is_none());
-    }
-
-}
+mod tests;
