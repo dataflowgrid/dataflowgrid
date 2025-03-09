@@ -1,30 +1,173 @@
-use tokio::io::AsyncReadExt;
+use std::sync::Arc;
 
-use crate::decoders::{self, decoders::TextDecoder};
+use crate::cursedbuffer::CursedBufferReader;
 
+
+#[derive(Debug)]
 pub enum ReaderError {
-}
-/// A trait to read chars from a stream
-pub trait AsyncReader {
-    async fn read_chunk(&self, chars: &[char]) -> Result<usize, ReaderError>;
-    async fn next_char(&self) -> char;
-    async fn peek_char(&self) -> char;
-    async fn skip(&self, n: usize);
+    EOF,
+    IO(std::io::Error),
 }
 
-struct DefaultAsyncReader<I: AsyncReadExt, D: TextDecoder> {
-    input: I,
-    decoder: D,
-    buffersize: u32
+pub trait Readable<T> {
+    fn read_next(&mut self) -> Result<T, ReaderError> where T: Copy;
+    fn skip(&mut self, skipped: usize) -> Result<usize, ReaderError>;
+    fn read_chunk(&mut self) -> Result<ReadableChunk<T>, ReaderError>;
+    fn pos(&self) -> Option<usize>;
+    fn len(&self) -> Option<usize>;
 }
 
-impl<I: AsyncReadExt,D: TextDecoder> DefaultAsyncReader<I,D> {
-    pub fn new(input: I, decoder: D, buffersize:u32) -> DefaultAsyncReader<I,D> {
-        DefaultAsyncReader {
-            input,
-            decoder,
-            buffersize
+pub struct CursedBufferReadable<T> {
+    reader: CursedBufferReader<T>,
+    current_chunk: Option<Arc<Box<[T]>>>,
+    current_chunk_pos: usize,
+    current_chunk_len: usize,
+}
+
+impl<T> CursedBufferReadable<T> {
+    pub fn new(reader: CursedBufferReader<T>) -> Self {
+        CursedBufferReadable { 
+            reader,
+            current_chunk: None,
+            current_chunk_pos: 0,
+            current_chunk_len: 0,
         }
     }
 }
 
+pub struct ReadableChunk<T> {
+    chunk: Arc<Box<[T]>>,
+    pos: usize,
+    len: usize
+}
+
+impl<T> Readable<T> for CursedBufferReadable<T> {
+    fn read_next(&mut self) -> Result<T, ReaderError> where T: Copy {
+        if self.current_chunk.is_none() {
+            match self.read_chunk() {
+                Ok(chunk) => {
+                    self.current_chunk = Some(chunk.chunk);
+                    self.current_chunk_pos = chunk.pos;
+                    self.current_chunk_len = chunk.len;
+                }
+                Err(e) => return Err(e)
+            }
+        }
+
+        match self.current_chunk {
+            Some(ref chunk) => {
+                let r = chunk[self.current_chunk_pos];
+                self.current_chunk_pos += 1;
+                if self.current_chunk_pos >= self.current_chunk_len {
+                    self.current_chunk = None;
+                }
+                Ok(r)
+            }
+            None => Err(ReaderError::EOF)
+        }
+    }
+
+    fn skip(&mut self, skipped: usize) -> Result<usize, ReaderError> {
+        //skip might be realizable in current_chunk, so we try that first
+        if self.current_chunk.is_some() {
+            let remaining = self.current_chunk_len - self.current_chunk_pos;
+            if skipped <= remaining {
+                self.current_chunk_pos += skipped;
+                return Ok(skipped);
+            } else {
+                self.current_chunk = None;
+                self.reader.skip(skipped);
+                return Ok(skipped);
+            }
+        } else {
+            self.reader.skip(skipped);
+            return Ok(skipped);
+        }
+    }
+
+    fn read_chunk(&mut self) -> Result<ReadableChunk<T>, ReaderError> {
+        if self.current_chunk.is_none() {
+            let chunk = self.reader.next_chunk();
+            match chunk {
+                Ok(chunk) => {
+                    self.current_chunk = Some(chunk.slice);
+                    self.current_chunk_pos = chunk.pos;
+                    self.current_chunk_len = chunk.len;
+                }
+                Err(_) => return Err(ReaderError::EOF),
+            }
+        }
+        let r = ReadableChunk {
+            chunk: std::mem::replace(&mut self.current_chunk, None).unwrap(), //we know this is save because of the previous check
+            pos: self.current_chunk_pos,
+            len: self.current_chunk_len
+        };
+        Ok(r)
+    }
+
+    fn pos(&self) -> Option<usize> {
+        Some(self.reader.pos())
+    }
+
+    fn len(&self) -> Option<usize> {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cursedbuffer::CursedBuffer;
+
+    #[test]
+    fn test_cursedbuffer_readable1() {
+
+        let buffer = CursedBuffer::<u8>::new();
+        buffer.write(Box::new([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])).unwrap();
+        let reader = buffer.reader(0);
+        let mut readable = CursedBufferReadable::new(reader);
+
+        readable.skip(2).unwrap();
+        assert_eq!(readable.read_next().unwrap(), 3);
+        assert_eq!(readable.read_next().unwrap(), 4);
+        readable.skip(2).unwrap();
+        assert_eq!(readable.read_next().unwrap(), 7);
+        assert_eq!(readable.read_next().unwrap(), 8);
+
+    }
+
+    #[test]
+    fn test_cursedbuffer_readable2() {
+
+        let buffer = CursedBuffer::<u8>::new();
+        buffer.write(Box::new([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])).unwrap();
+        let reader = buffer.reader(0);
+        let mut readable = CursedBufferReadable::new(reader);
+
+        readable.skip(2).unwrap();
+        assert_eq!(readable.read_next().unwrap(), 3);
+        let b = readable.read_chunk().unwrap();
+        assert_eq!(b.len, 10);
+        assert_eq!(b.pos, 3);
+        assert_eq!(b.chunk[b.pos], 4);
+    }
+
+    #[test]
+    fn test_cursedbuffer_readable3() {
+
+        let buffer = CursedBuffer::<u8>::new();
+        buffer.write(Box::new([1, 2])).unwrap();
+        let reader = buffer.reader(0);
+        let mut readable = CursedBufferReadable::new(reader);
+
+        readable.skip(2).unwrap();
+        buffer.write(Box::new([3, 4, 5, 6, 7, 8, 9, 10])).unwrap();
+
+        assert_eq!(readable.read_next().unwrap(), 3);
+        let b = readable.read_chunk().unwrap();
+        assert_eq!(b.len, 8);
+        assert_eq!(b.pos, 1);
+        assert_eq!(b.chunk[b.pos], 4);
+    }
+
+}

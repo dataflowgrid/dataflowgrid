@@ -45,7 +45,7 @@ pub enum StreamableJSONReaderCallbackReturn {
 
 enum Callback<'a> {
     None,
-    Function(&'a dyn StreamableJSONReaderCallback)
+    Function(String, &'a dyn StreamableJSONReaderCallback)
 }
 use std::error::Error;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
@@ -55,7 +55,10 @@ impl<'a> Debug for Callback<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             Callback::None => write!(f, "None"),
-            Callback::Function(_) => write!(f, "Function")
+            Callback::Function(name, _) => {
+                let typename = std::any::type_name::<&'a dyn StreamableJSONReaderCallback>();
+                write!(f, "Function {name}({typename})")
+            }
         }
     }
 }
@@ -87,7 +90,7 @@ impl<'a> StreambleJSONReader<'a> {
 
         let r = callback.on_streamablejson_event(StreamableJSONReaderEvent::Initialized);
         StreambleJSONReader {
-            callback: Callback::Function(callback),
+            callback: Callback::Function(String::from("callback"), callback),
             chars: Vec::new(),
             stack,
             stringescape: false,
@@ -100,7 +103,7 @@ impl<'a> StreambleJSONReader<'a> {
 
     fn callback(&mut self, event: StreamableJSONReaderEvent) {
         self.last_callback_return = match &self.callback {
-            Callback::Function(f) => f.on_streamablejson_event(event),
+            Callback::Function(_, f) => f.on_streamablejson_event(event),
             Callback::None => StreamableJSONReaderCallbackReturn::Continue,
         }
     }

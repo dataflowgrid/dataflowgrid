@@ -83,6 +83,7 @@ dependencies = [
 name = "doss"
 version = "0.1.0"
 dependencies = [
+ "dataflowgrid-commons",
  "tokio",
 ]
 
@@ -439,6 +440,7 @@ dependencies = [
 name = "streamablejson"
 version = "0.1.0"
 dependencies = [
+ "dataflowgrid-commons",
  "tokio",
 ]
 

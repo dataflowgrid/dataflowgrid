@@ -2,7 +2,7 @@
 
 use std::{collections::BTreeMap, io::Result};
 use tokio::io::AsyncReadExt;
-use super::ordered_multi_dict::OrderedMultiDictEntry;
+use dataflowgrid_commons::ordered_multi_dict::OrderedMultiDict;
 
 #[derive(Debug)]
 pub enum DossLowLevelStreamEvent {
@@ -22,6 +22,8 @@ pub enum DossLowLevelStreamEvent {
     ArrayEnd = 13,
     NULL = 14,
     UnsignedVarint = 15,
+    TypeStart = 16,
+    TypeEnd = 17,
 
     SetConfig = 20,
     StoreInDict = 21,

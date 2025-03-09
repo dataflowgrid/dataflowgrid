@@ -3,36 +3,25 @@
 #![allow(dead_code)]
 
 #[derive(PartialEq, Debug)]
-pub enum OrderedMultiDictEntry<'a> {
-    String { str: &'a str},
-    Decimal { int: usize},
-    Null,
-    List { list: Vec<OrderedMultiDictEntry<'a>>},
-    Dict { dict: OrderedMultiDict<'a>},
-    True,
-    False
+pub struct OrderedMultiDict<K, V> {
+    entries: Vec<V>,
+    keys: Vec<K>
 }
 
-#[derive(PartialEq, Debug)]
-struct OrderedMultiDict<'a> {
-    entries: Vec<OrderedMultiDictEntry<'a>>,
-    keys: Vec<&'a str>
-}
-
-impl<'a> OrderedMultiDict<'a> {
-    fn new() -> OrderedMultiDict<'a> {
+impl<K,V> OrderedMultiDict<K,V> {
+    fn new() -> OrderedMultiDict<K,V> {
         OrderedMultiDict {
             entries: Vec::new(),
             keys: Vec::new()
         }
     }
 
-    fn insert(&mut self, key: &'a str, value: OrderedMultiDictEntry<'a>) {
+    fn insert(&mut self, key: K, value: V) {
         self.keys.push(key);
         self.entries.push(value);
     }
 
-    fn get(&self, key: &'a str) -> Option<&OrderedMultiDictEntry> {
+    fn get(&self, key: K ) -> Option<&V> where K: PartialEq {
         let index = self.keys.iter().position(|x| *x == key);
         match index {
             Some(i) => Some(&self.entries[i]),
@@ -40,7 +29,7 @@ impl<'a> OrderedMultiDict<'a> {
         }
     }
 
-    fn remove(&mut self, key: &'a str) {
+    fn remove(&mut self, key: K) where K: PartialEq {
         let index = self.keys.iter().position(|x| *x == key);
         match index {
             Some(i) => {
@@ -61,9 +50,21 @@ impl<'a> OrderedMultiDict<'a> {
 mod tests {
     use super::*;
 
+    #[derive(PartialEq, Debug)]
+    enum OrderedMultiDictEntry<'a> {
+        String { str: &'a str},
+        Decimal { int: usize},
+        Null,
+        List { list: Vec<OrderedMultiDictEntry<'a>>},
+        Dict { dict: OrderedMultiDict<&'a str, OrderedMultiDictEntry<'a>>},
+        True,
+        False,
+        None //an entry that should not be there and should be ignored
+    }
+    
     #[test]
     fn empty() {
-        let result = OrderedMultiDict::new();
+        let result = OrderedMultiDict::<&str, OrderedMultiDictEntry>::new();
         assert_eq!(result.length(), 0);
     }
 

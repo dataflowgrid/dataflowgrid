@@ -48,8 +48,9 @@ pub struct CursedBufferReader<T> {
 
 #[derive(Debug)]
 pub struct CursedChunk<T> {
-    slice: Arc<Box<[T]>>,
-    pos: usize
+    pub slice: Arc<Box<[T]>>,
+    pub pos: usize,
+    pub len: usize,
 }
 
 
@@ -159,18 +160,18 @@ impl<T> Drop for CursedBufferReader<T> {
 
 
 impl<T> CursedBufferReader<T> {
-    fn pos(&self) -> usize {
+    pub fn pos(&self) -> usize {
         let bufferstate = self.bufferstate.lock().unwrap();
         bufferstate.all_readers[self.reader_in_buffer].as_ref().unwrap().position
     }
 
-    fn skip(&self, len:usize) {
+    pub fn skip(&self, len:usize) {
         let mut bufferstate = self.bufferstate.lock().unwrap();
         bufferstate.all_readers[self.reader_in_buffer].as_mut().unwrap().position += len;
         bufferstate.sync_reader_states();
     }
 
-    fn next_chunk(&self) -> Result<CursedChunk<T>, CursedBufferError> {
+    pub fn next_chunk(&self) -> Result<CursedChunk<T>, CursedBufferError> {
         let mut bufferstate = self.bufferstate.lock().unwrap();
 
         //our own position is in internalstate.pos
@@ -195,7 +196,8 @@ impl<T> CursedBufferReader<T> {
 
         let r = CursedChunk{
             slice: bufferstate.buffers[i].clone(),
-            pos: still_to_go
+            pos: still_to_go,
+            len: bufferstate.buffers[i].len()
         };
         bufferstate.sync_reader_states();
         Ok(r)
@@ -227,18 +229,18 @@ mod tests {
     #[test]
     fn it_works() {
         let b = CursedBuffer::<u8>::new();
-        b.write(Box::new([1, 2, 3, 4, 5]));
+        b.write(Box::new([1, 2, 3, 4, 5])).unwrap();
         let r = b.reader(0);
         let x = r.next_chunk();
         println!("{:?}",x);
         let x = r.next_chunk();
         println!("{:?}",x);
-        b.write(Box::new([1, 2, 3]));
+        b.write(Box::new([1, 2, 3])).unwrap();
         let x = r.next_chunk();
         println!("{:?}",x);
-        b.write(Box::new([1, 2, 3, 4]));
+        b.write(Box::new([1, 2, 3, 4])).unwrap();
         r.skip(5);
-        b.write(Box::new([1, 2, 3, 5]));
+        b.write(Box::new([1, 2, 3, 5])).unwrap();
         let x = r.next_chunk();
         println!("{:?}",x.unwrap().as_slice());
         let x = r.next_chunk();

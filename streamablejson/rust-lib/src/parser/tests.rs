@@ -19,9 +19,9 @@ impl StreamableJSONReaderCallback for TestCallback {
 #[test]
 fn test_entities() {
     let b = "true ";
-    let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
+    let c = TestCallback { events: RefCell::new(Vec::new()) };
 
-    let mut reader = StreambleJSONReader::new(c.as_ref());
+    let mut reader = StreambleJSONReader::new(&c);
 
     reader.pushdata(b.chars()).unwrap();
     let mut events = c.events.borrow_mut();
@@ -36,9 +36,9 @@ fn test_entities() {
 #[test]
 fn test_string1() {
     let b = " \"test\" ";
-    let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
+    let c = TestCallback { events: RefCell::new(Vec::new()) };
 
-    let mut reader = StreambleJSONReader::new(c.as_ref());
+    let mut reader = StreambleJSONReader::new(&c);
 
     reader.pushdata(b.chars()).unwrap();
     reader.finish().unwrap();
@@ -54,9 +54,9 @@ fn test_string1() {
 #[test]
 fn test_unicodeescape() {
     let b = " \"test\\\"\\u0008\\u000c\\n\\r\\t\\\\\"";
-    let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
+    let c = TestCallback { events: RefCell::new(Vec::new()) };
 
-    let mut reader = StreambleJSONReader::new(c.as_ref());
+    let mut reader = StreambleJSONReader::new(&c);
 
     reader.pushdata(b.chars()).unwrap();
     reader.finish().unwrap();
@@ -72,9 +72,9 @@ fn test_unicodeescape() {
 #[test]
 fn test_constant() {
     let b = " test";
-    let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
+    let c = TestCallback { events: RefCell::new(Vec::new()) };
 
-    let mut reader = StreambleJSONReader::new(c.as_ref());
+    let mut reader = StreambleJSONReader::new(&c);
 
     reader.pushdata(b.chars()).unwrap();
     reader.finish().unwrap();
@@ -90,9 +90,9 @@ fn test_constant() {
 #[test]
 fn test_invalid_constant() {
     let b = " test";
-    let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
+    let c = TestCallback { events: RefCell::new(Vec::new()) };
 
-    let mut reader = StreambleJSONReader::new(c.as_ref());
+    let mut reader = StreambleJSONReader::new(&c);
 
     reader.pushdata(b.chars()).unwrap();
     reader.pushdata(":2".chars()).expect_err("this should fail because not inside of object");
