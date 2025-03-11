@@ -9,19 +9,19 @@ pub struct OrderedMultiDict<K, V> {
 }
 
 impl<K,V> OrderedMultiDict<K,V> {
-    fn new() -> OrderedMultiDict<K,V> {
+    pub fn new() -> OrderedMultiDict<K,V> {
         OrderedMultiDict {
             entries: Vec::new(),
             keys: Vec::new()
         }
     }
 
-    fn insert(&mut self, key: K, value: V) {
+    pub fn push(&mut self, key: K, value: V) {
         self.keys.push(key);
         self.entries.push(value);
     }
 
-    fn get(&self, key: K ) -> Option<&V> where K: PartialEq {
+    pub fn get(&self, key: K ) -> Option<&V> where K: PartialEq {
         let index = self.keys.iter().position(|x| *x == key);
         match index {
             Some(i) => Some(&self.entries[i]),
@@ -29,7 +29,7 @@ impl<K,V> OrderedMultiDict<K,V> {
         }
     }
 
-    fn remove(&mut self, key: K) where K: PartialEq {
+    pub fn remove(&mut self, key: K) where K: PartialEq {
         let index = self.keys.iter().position(|x| *x == key);
         match index {
             Some(i) => {
@@ -71,7 +71,7 @@ mod tests {
     #[test]
     fn insert_remove() {
         let mut result = OrderedMultiDict::new();
-        result.insert("key", OrderedMultiDictEntry::String { str: "value"});
+        result.push("key", OrderedMultiDictEntry::String { str: "value"});
         assert_eq!(result.length(), 1);
         assert_eq!(result.get("key").unwrap(), &OrderedMultiDictEntry::String { str: "value"});
 
@@ -83,7 +83,7 @@ mod tests {
     #[test]
     fn insert_empty_list() {
         let mut result = OrderedMultiDict::new();
-        result.insert("key", OrderedMultiDictEntry::List { list: Vec::new()});
+        result.push("key", OrderedMultiDictEntry::List { list: Vec::new()});
         assert_eq!(result.length(), 1);
         assert_eq!(result.get("key").unwrap(), &OrderedMultiDictEntry::List { list: Vec::new()});
     }

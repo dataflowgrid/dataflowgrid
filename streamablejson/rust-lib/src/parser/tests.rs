@@ -2,6 +2,8 @@
 
 use std::cell::RefCell;
 
+use dataflowgrid_commons::readers::reader::IteratorReadable;
+
 use super::*;
 
 struct TestCallback {
@@ -9,7 +11,7 @@ struct TestCallback {
 }
 
 impl StreamableJSONReaderCallback for TestCallback {
-    fn on_streamablejson_event(&self, event: StreamableJSONReaderEvent) -> StreamableJSONReaderCallbackReturn {
+    fn on_streamablejson_event(&mut self, event: StreamableJSONReaderEvent) -> StreamableJSONReaderCallbackReturn {
         println!("{:?}", event);
         self.events.borrow_mut().push(event);
         StreamableJSONReaderCallbackReturn::Continue
@@ -19,11 +21,11 @@ impl StreamableJSONReaderCallback for TestCallback {
 #[test]
 fn test_entities() {
     let b = "true ";
-    let c = TestCallback { events: RefCell::new(Vec::new()) };
+    let mut c = TestCallback { events: RefCell::new(Vec::new()) };
 
-    let mut reader = StreambleJSONReader::new(&c);
+    let mut reader = StreamableJSONReader::new(&mut c);
 
-    reader.pushdata(b.chars()).unwrap();
+    reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).unwrap();
     let mut events = c.events.borrow_mut();
 
     //as no finish was called, wo don't get the finished event
@@ -36,11 +38,11 @@ fn test_entities() {
 #[test]
 fn test_string1() {
     let b = " \"test\" ";
-    let c = TestCallback { events: RefCell::new(Vec::new()) };
+    let mut c = TestCallback { events: RefCell::new(Vec::new()) };
 
-    let mut reader = StreambleJSONReader::new(&c);
+    let mut reader = StreamableJSONReader::new(&mut c);
 
-    reader.pushdata(b.chars()).unwrap();
+    reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).unwrap();
     reader.finish().unwrap();
 
     let mut events = c.events.borrow_mut();
@@ -54,11 +56,11 @@ fn test_string1() {
 #[test]
 fn test_unicodeescape() {
     let b = " \"test\\\"\\u0008\\u000c\\n\\r\\t\\\\\"";
-    let c = TestCallback { events: RefCell::new(Vec::new()) };
+    let mut c = TestCallback { events: RefCell::new(Vec::new()) };
 
-    let mut reader = StreambleJSONReader::new(&c);
+    let mut reader = StreamableJSONReader::new(&mut c);
 
-    reader.pushdata(b.chars()).unwrap();
+    reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).unwrap();
     reader.finish().unwrap();
 
     let mut events = c.events.borrow_mut();
@@ -72,11 +74,11 @@ fn test_unicodeescape() {
 #[test]
 fn test_constant() {
     let b = " test";
-    let c = TestCallback { events: RefCell::new(Vec::new()) };
+    let mut c = TestCallback { events: RefCell::new(Vec::new()) };
 
-    let mut reader = StreambleJSONReader::new(&c);
+    let mut reader = StreamableJSONReader::new(&mut c);
 
-    reader.pushdata(b.chars()).unwrap();
+    reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).unwrap();
     reader.finish().unwrap();
 
     let mut events = c.events.borrow_mut();
@@ -90,12 +92,12 @@ fn test_constant() {
 #[test]
 fn test_invalid_constant() {
     let b = " test";
-    let c = TestCallback { events: RefCell::new(Vec::new()) };
+    let mut c = TestCallback { events: RefCell::new(Vec::new()) };
 
-    let mut reader = StreambleJSONReader::new(&c);
+    let mut reader = StreamableJSONReader::new(&mut c);
 
-    reader.pushdata(b.chars()).unwrap();
-    reader.pushdata(":2".chars()).expect_err("this should fail because not inside of object");
+    reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).unwrap();
+    reader.pushdata(&mut IteratorReadable::new(Box::new(":2".chars()))).expect_err("this should fail because not inside of object");
     reader.finish().expect_err("finish is also in invalid state");
 
     let mut events = c.events.borrow_mut();
@@ -108,10 +110,10 @@ fn test_invalid_constant() {
 
 #[test]
 fn test_type() {
-    let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-    let mut reader = StreambleJSONReader::new(c.as_ref());
-
-    reader.pushdata("test()".chars()).unwrap();
+    let mut c = TestCallback { events: RefCell::new(Vec::new()) };
+    let mut reader = StreamableJSONReader::new(&mut c);
+    let b = "test()";
+    reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).unwrap();
     reader.finish().unwrap();
 
     let mut events = c.events.borrow_mut();
@@ -126,10 +128,10 @@ fn test_type() {
 
 #[test]
 fn test_type_with_string() {
-    let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-    let mut reader = StreambleJSONReader::new(c.as_ref());
-
-    reader.pushdata("test(\"string\")".chars()).unwrap();
+    let mut c = TestCallback { events: RefCell::new(Vec::new()) };
+    let mut reader = StreamableJSONReader::new(&mut c);
+    let b = "test(\"string\")";
+    reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).unwrap();
     reader.finish().unwrap();
 
     let mut events = c.events.borrow_mut();
@@ -144,10 +146,10 @@ fn test_type_with_string() {
 
 #[test]
 fn test_empty_array() {
-    let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-    let mut reader = StreambleJSONReader::new(c.as_ref());
-
-    reader.pushdata("[]".chars()).unwrap();
+    let mut c = TestCallback { events: RefCell::new(Vec::new()) };
+    let mut reader = StreamableJSONReader::new(&mut c);
+    let b = "[]";
+    reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).unwrap();
     reader.finish().unwrap();
 
     let mut events = c.events.borrow_mut();
@@ -161,10 +163,10 @@ fn test_empty_array() {
 
 #[test]
 fn test_array_with_numbers() {
-    let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-    let mut reader = StreambleJSONReader::new(c.as_ref());
-
-    reader.pushdata("[1,2]".chars()).unwrap();
+    let mut c = TestCallback { events: RefCell::new(Vec::new()) };
+    let mut reader = StreamableJSONReader::new(&mut c);
+    let b = "[1,2]";
+    reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).unwrap();
     reader.finish().unwrap();
 
     let mut events = c.events.borrow_mut();
@@ -179,10 +181,10 @@ fn test_array_with_numbers() {
 
 #[test]
 fn test_array_with_strings() {
-    let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-    let mut reader = StreambleJSONReader::new(c.as_ref());
-
-    reader.pushdata("[\"abc\",\"def\"]".chars()).unwrap();
+    let mut c = TestCallback { events: RefCell::new(Vec::new()) };
+    let mut reader = StreamableJSONReader::new(&mut c);
+    let b = "[\"abc\",\"def\"]";
+    reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).unwrap();
     reader.finish().unwrap();
 
     let mut events = c.events.borrow_mut();
@@ -197,10 +199,10 @@ fn test_array_with_strings() {
 
 #[test]
 fn test_array_with_numbers_and_strings() {
-    let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-    let mut reader = StreambleJSONReader::new(c.as_ref());
-
-    reader.pushdata("[\"abc\", 1,\"def\" ,2]".chars()).unwrap();
+    let mut c = TestCallback { events: RefCell::new(Vec::new()) };
+    let mut reader = StreamableJSONReader::new(&mut c);
+    let b = "[\"abc\", 1,\"def\" ,2]";
+    reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).unwrap();
     reader.finish().unwrap();
 
     let mut events = c.events.borrow_mut();
@@ -217,10 +219,10 @@ fn test_array_with_numbers_and_strings() {
 
 #[test]
 fn test_empty_object() {
-    let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-    let mut reader = StreambleJSONReader::new(c.as_ref());
-
-    reader.pushdata("{}".chars()).unwrap();
+    let mut c = TestCallback { events: RefCell::new(Vec::new()) };
+    let mut reader = StreamableJSONReader::new(&mut c);
+    let b = "{}";
+    reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).unwrap();
     reader.finish().unwrap();
 
     let mut events = c.events.borrow_mut();
@@ -233,10 +235,10 @@ fn test_empty_object() {
 
 #[test]
 fn test_object() {
-    let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-    let mut reader = StreambleJSONReader::new(c.as_ref());
-
-    reader.pushdata("{\"abc\":\"def\"}".chars()).unwrap();
+    let mut c = TestCallback { events: RefCell::new(Vec::new()) };
+    let mut reader = StreamableJSONReader::new(&mut c);
+    let b = "{\"abc\":\"def\"}";
+    reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).unwrap();
     reader.finish().unwrap();
 
     let mut events = c.events.borrow_mut();
@@ -251,10 +253,10 @@ fn test_object() {
 
 #[test]
 fn test_object2() {
-    let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-    let mut reader = StreambleJSONReader::new(c.as_ref());
-
-    reader.pushdata("{\"abc\":\"def\", 1: 2}".chars()).unwrap();
+    let mut c = TestCallback { events: RefCell::new(Vec::new()) };
+    let mut reader = StreamableJSONReader::new(&mut c);
+    let b = "{\"abc\":\"def\", 1: 2}";
+    reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).unwrap();
     reader.finish().unwrap();
 
     let mut events = c.events.borrow_mut();
@@ -271,10 +273,10 @@ fn test_object2() {
 
 #[test]
 fn test_nestedobject1() {
-    let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-    let mut reader = StreambleJSONReader::new(c.as_ref());
-
-    reader.pushdata("{1 : { 2:3}}".chars()).unwrap();
+    let mut c = TestCallback { events: RefCell::new(Vec::new()) };
+    let mut reader = StreamableJSONReader::new(&mut c);
+    let b = "{1 : { 2:3}}";
+    reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).unwrap();
     reader.finish().unwrap();
 
     let mut events = c.events.borrow_mut();
@@ -293,10 +295,10 @@ fn test_nestedobject1() {
 
 #[test]
 fn test_nestedobject1_with_array() {
-    let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-    let mut reader = StreambleJSONReader::new(c.as_ref());
-
-    reader.pushdata("{1 : [{ 2:3},{4:5}]}".chars()).unwrap();
+    let mut c = TestCallback { events: RefCell::new(Vec::new()) };
+    let mut reader = StreamableJSONReader::new(&mut c);
+    let b = "{1 : [{ 2:3},{4:5}]}";
+    reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).unwrap();
     reader.finish().unwrap();
 
     let mut events = c.events.borrow_mut();
@@ -320,10 +322,10 @@ fn test_nestedobject1_with_array() {
 
 #[test]
 fn test_type_mapping() {
-    let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-    let mut reader = StreambleJSONReader::new(c.as_ref());
-
-    reader.pushdata("{a(b):c(d)}".chars()).unwrap();
+    let mut c = TestCallback { events: RefCell::new(Vec::new()) };
+    let mut reader = StreamableJSONReader::new(&mut c);
+    let b = "{a(b):c(d)}";
+    reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).unwrap();
     reader.finish().unwrap();
 
     let mut events = c.events.borrow_mut();
@@ -343,10 +345,10 @@ fn test_type_mapping() {
 
 #[test]
 fn test_nested_type() {
-    let c = Box::new(TestCallback { events: RefCell::new(Vec::new()) });
-    let mut reader = StreambleJSONReader::new(c.as_ref());
-
-    reader.pushdata("{a(b(c)):d(e)}".chars()).unwrap();
+    let mut c = TestCallback { events: RefCell::new(Vec::new()) };
+    let mut reader = StreamableJSONReader::new(&mut c);
+    let b = "{a(b(c)):d(e)}";
+    reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).unwrap();
     reader.finish().unwrap();
 
     let mut events = c.events.borrow_mut();

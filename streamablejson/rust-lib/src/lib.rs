@@ -1,4 +1,5 @@
-pub(crate) mod parser;
+pub mod parser;
+pub mod deserializer;
 
 pub struct JsonStreamReader {
 }

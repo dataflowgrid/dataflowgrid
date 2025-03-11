@@ -1,3 +1,4 @@
+/* This file is part of dataFlowGrid. See file LICENSE for full license details. (c) 2025 Alexander Zich */
 use std::sync::Arc;
 
 use crate::cursedbuffer::CursedBufferReader;
@@ -107,6 +108,64 @@ impl<T> Readable<T> for CursedBufferReadable<T> {
 
     fn pos(&self) -> Option<usize> {
         Some(self.reader.pos())
+    }
+
+    fn len(&self) -> Option<usize> {
+        None
+    }
+}
+
+pub struct IteratorReadable<T> {
+    iter: Box<dyn Iterator<Item=T>>,
+    pos: usize,
+}
+
+impl<T> IteratorReadable<T> {
+    pub fn new(iter: Box<dyn Iterator<Item=T>>) -> Self {
+        IteratorReadable {
+            iter,
+            pos: 0,
+        }
+    }
+}
+
+impl<T> Readable<T> for IteratorReadable<T> where T: Copy {
+    fn read_next(&mut self) -> Result<T, ReaderError> {
+        match self.iter.next() {
+            Some(v) => {
+                self.pos += 1;
+                Ok(v)
+            }
+            None => Err(ReaderError::EOF)
+        }
+    }
+
+    fn skip(&mut self, skipped: usize) -> Result<usize, ReaderError> {
+        for _ in 0..skipped {
+            match self.iter.next() {
+                Some(_) => self.pos += 1,
+                None => return Ok(self.pos)
+            }
+        }
+        Ok(self.pos)
+    }
+
+    fn read_chunk(&mut self) -> Result<ReadableChunk<T>, ReaderError> {
+        let n = self.iter.next();
+        match n {
+            None => return Err(ReaderError::EOF),
+            Some(v) => {
+                Ok(ReadableChunk {
+                    chunk: Arc::new(Box::new([v])),
+                    pos: 0,
+                    len: 1
+                })
+            }
+        }
+    }
+
+    fn pos(&self) -> Option<usize> {
+        Some(self.pos)
     }
 
     fn len(&self) -> Option<usize> {

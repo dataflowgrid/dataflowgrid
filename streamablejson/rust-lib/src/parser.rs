@@ -45,11 +45,13 @@ pub enum StreamableJSONReaderCallbackReturn {
 
 enum Callback<'a> {
     None,
-    Function(String, &'a dyn StreamableJSONReaderCallback)
+    Function(String, &'a mut dyn StreamableJSONReaderCallback)
 }
 use std::error::Error;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
-use std::str::Chars;
+use std::io::ErrorKind;
+
+use dataflowgrid_commons::readers::reader::Readable;
 
 impl<'a> Debug for Callback<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
@@ -66,11 +68,11 @@ impl<'a> Debug for Callback<'a> {
 
 
 pub trait StreamableJSONReaderCallback {
-    fn on_streamablejson_event(&self, event: StreamableJSONReaderEvent) -> StreamableJSONReaderCallbackReturn;
+    fn on_streamablejson_event(&mut self, event: StreamableJSONReaderEvent) -> StreamableJSONReaderCallbackReturn;
 }
 
 #[derive(Debug)]
-pub struct StreambleJSONReader<'a> {
+pub struct StreamableJSONReader<'a> {
     callback: Callback<'a>,
     chars: Vec<char>,
     stack: Vec<StreamableJSONReaderStateEnum>,
@@ -83,13 +85,13 @@ pub struct StreambleJSONReader<'a> {
     last_callback_return: StreamableJSONReaderCallbackReturn,
 }
 
-impl<'a> StreambleJSONReader<'a> {
-    pub fn new(callback: &'a dyn StreamableJSONReaderCallback) -> StreambleJSONReader<'a> {   
+impl<'a> StreamableJSONReader<'a> {
+    pub fn new(callback: &'a mut dyn StreamableJSONReaderCallback) -> StreamableJSONReader<'a> {   
         let mut stack = Vec::new();
         stack.push(StreamableJSONReaderStateEnum::INIT{is_key: false});
 
         let r = callback.on_streamablejson_event(StreamableJSONReaderEvent::Initialized);
-        StreambleJSONReader {
+        StreamableJSONReader {
             callback: Callback::Function(String::from("callback"), callback),
             chars: Vec::new(),
             stack,
@@ -102,14 +104,13 @@ impl<'a> StreambleJSONReader<'a> {
     }
 
     fn callback(&mut self, event: StreamableJSONReaderEvent) {
-        self.last_callback_return = match &self.callback {
+        self.last_callback_return = match &mut self.callback {
             Callback::Function(_, f) => f.on_streamablejson_event(event),
             Callback::None => StreamableJSONReaderCallbackReturn::Continue,
         }
     }
 
-    pub fn pushdata(&mut self, data: Chars) -> Result<(), StreamableJSONReaderError> {
-        let mut iter = data.into_iter();
+    pub fn pushdata(&mut self, data: &mut dyn Readable<char>) -> Result<(), StreamableJSONReaderError> {
         let mut reprocess_char = false;
         let mut c = ' ';
         loop {
@@ -121,12 +122,15 @@ impl<'a> StreambleJSONReader<'a> {
                 return Ok(());
             }
             if !reprocess_char {
-                match iter.next() {
-                    Some(ch) => {
+                match data.read_next() {
+                    Ok(ch) => {
                         c = ch;
                     }
-                    None => {
+                    Err(dataflowgrid_commons::readers::reader::ReaderError::EOF) => {
                         return Ok(());
+                    }
+                    Err(e) => {
+                        return Err(StreamableJSONReaderError::CallbackError(Box::new(std::io::Error::new(ErrorKind::Other, "test"))));
                     }
                 }
             }
@@ -371,6 +375,7 @@ mod tests;
 mod tests2 {
     use super::*;
     use std::cell::RefCell;
+    use dataflowgrid_commons::readers::reader::IteratorReadable;
 
     struct TestCallback {
         result: RefCell<Vec<StreamableJSONReaderCallbackReturn>>,
@@ -378,7 +383,7 @@ mod tests2 {
     }
     
     impl StreamableJSONReaderCallback for TestCallback {
-        fn on_streamablejson_event(&self, event: StreamableJSONReaderEvent) -> StreamableJSONReaderCallbackReturn {
+        fn on_streamablejson_event(&mut self, event: StreamableJSONReaderEvent) -> StreamableJSONReaderCallbackReturn {
             println!("{:?}", event);
             self.events.borrow_mut().push(event);
             self.result.borrow_mut().pop().unwrap()
@@ -388,7 +393,7 @@ mod tests2 {
     #[test]
     fn test_continue() {
         let b = "{}";
-        let c = Box::new(TestCallback { 
+        let mut c = Box::new(TestCallback { 
             result: RefCell::new(
                 vec![
                     StreamableJSONReaderCallbackReturn::Continue,
@@ -400,9 +405,9 @@ mod tests2 {
             events: RefCell::new(Vec::new()) 
         });
     
-        let mut reader = StreambleJSONReader::new(c.as_ref());
+        let mut reader = StreamableJSONReader::new(c.as_mut());
     
-        reader.pushdata(b.chars()).unwrap();
+        reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).unwrap();
         reader.finish().unwrap();
         let mut events = c.events.borrow_mut();
     
@@ -417,7 +422,7 @@ mod tests2 {
     #[test]
     fn test_stopok() {
         let b = "{}";
-        let c = Box::new(TestCallback { 
+        let mut c = Box::new(TestCallback { 
             result: RefCell::new(
                 vec![
                     StreamableJSONReaderCallbackReturn::Continue,
@@ -427,9 +432,9 @@ mod tests2 {
             events: RefCell::new(Vec::new()) 
         });
     
-        let mut reader = StreambleJSONReader::new(c.as_ref());
+        let mut reader = StreamableJSONReader::new(c.as_mut());
     
-        reader.pushdata(b.chars()).unwrap();
+        reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).unwrap();
         reader.finish().unwrap(); //finish works because we never nested into any object
         let mut events = c.events.borrow_mut();
     
@@ -442,7 +447,7 @@ mod tests2 {
     #[test]
     fn test_stopok2() {
         let b = "{}";
-        let c = Box::new(TestCallback { 
+        let mut c = Box::new(TestCallback { 
             result: RefCell::new(
                 vec![
                     StreamableJSONReaderCallbackReturn::Continue,
@@ -453,9 +458,9 @@ mod tests2 {
             events: RefCell::new(Vec::new()) 
         });
     
-        let mut reader = StreambleJSONReader::new(c.as_ref());
+        let mut reader = StreamableJSONReader::new(c.as_mut());
     
-        reader.pushdata(b.chars()).unwrap();
+        reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).unwrap();
         reader.finish().expect_err("we were in the middle of an object");
         let mut events = c.events.borrow_mut();
     
@@ -468,7 +473,7 @@ mod tests2 {
     #[test]
     fn test_stoperr() {
         let b = "{}";
-        let c = Box::new(TestCallback { 
+        let mut c = Box::new(TestCallback { 
             result: RefCell::new(
                 vec![
                     StreamableJSONReaderCallbackReturn::Continue,
@@ -479,9 +484,9 @@ mod tests2 {
             events: RefCell::new(Vec::new()) 
         });
     
-        let mut reader = StreambleJSONReader::new(c.as_ref());
+        let mut reader = StreamableJSONReader::new(c.as_mut());
     
-        let err = reader.pushdata(b.chars()).expect_err("we generated this error");
+        let err = reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).expect_err("we generated this error");
         if let StreamableJSONReaderError::CallbackError(err) = err {
             let err = err.as_ref();
             assert!(err.is::<std::io::Error>());
