@@ -2,6 +2,7 @@
 #![allow(unused_imports)]
 use std::{clone, fs::read, future, ops::{Deref, DerefMut}, rc::Rc, sync::{Arc, Mutex, Weak}};
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
+use derive_more::{Display, Error};
 
 
 //internal state structs
@@ -22,7 +23,7 @@ impl Debug for Callback {
 #[derive(Debug)]
 struct CursedBufferInternalState<T> {
     first_read_position: usize, //the first element's of the first slice of buffers position
-    buffers: Vec<Arc<Box<[T]>>>,
+    buffers: Vec<Arc<Vec<T>>>,
     is_closed: bool,
     all_readers: Vec<Option<CursedBufferReaderInternalState>>,
     callback_function: Callback
@@ -48,13 +49,13 @@ pub struct CursedBufferReader<T> {
 
 #[derive(Debug)]
 pub struct CursedChunk<T> {
-    pub slice: Arc<Box<[T]>>,
+    pub slice: Arc<Vec<T>>,
     pub pos: usize,
     pub len: usize,
 }
 
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Display, Error)]
 pub enum CursedBufferError {
     NotEnoughData,
     InvalidData,
@@ -113,7 +114,7 @@ impl<T> CursedBuffer<T> {
         }
     }
 
-    pub fn write(&self, data: Box<[T]>) -> Result<(), CursedBufferError> {
+    pub fn write(&self, data: Vec<T>) -> Result<(), CursedBufferError> {
         let mut s = self.bufferstate.lock().unwrap();
         if s.is_closed {
             return Err(CursedBufferError::BufferClosed);
@@ -229,18 +230,18 @@ mod tests {
     #[test]
     fn it_works() {
         let b = CursedBuffer::<u8>::new();
-        b.write(Box::new([1, 2, 3, 4, 5])).unwrap();
+        b.write(vec![1, 2, 3, 4, 5]).unwrap();
         let r = b.reader(0);
         let x = r.next_chunk();
         println!("{:?}",x);
         let x = r.next_chunk();
         println!("{:?}",x);
-        b.write(Box::new([1, 2, 3])).unwrap();
+        b.write(vec![1, 2, 3]).unwrap();
         let x = r.next_chunk();
         println!("{:?}",x);
-        b.write(Box::new([1, 2, 3, 4])).unwrap();
+        b.write(vec![1, 2, 3, 4]).unwrap();
         r.skip(5);
-        b.write(Box::new([1, 2, 3, 5])).unwrap();
+        b.write(vec![1, 2, 3, 5]).unwrap();
         let x = r.next_chunk();
         println!("{:?}",x.unwrap().as_slice());
         let x = r.next_chunk();
@@ -250,9 +251,9 @@ mod tests {
     #[test]
     fn test_close() {
         let mut b = CursedBuffer::<u8>::new();
-        b.write(Box::new([1, 2, 3, 4, 5])).expect("");
+        b.write(vec![1, 2, 3, 4, 5]).expect("");
         b.close();
-        b.write(Box::new([1, 2, 3, 4, 5])).expect_err("");
+        b.write(vec![1, 2, 3, 4, 5]).expect_err("");
     }
 
     #[test]
@@ -264,7 +265,7 @@ mod tests {
             println!("Callback called");
             c2.replace(1);
         }));
-        let _ = b.write(Box::new([1, 2, 3, 4, 5]));
+        let _ = b.write(vec![1, 2, 3, 4, 5]);
         let r = b.reader(0);
         let x = r.next_chunk();
         println!("{:?}",x);

@@ -3,16 +3,7 @@
 use dataflowgrid_commons::ordered_multi_dict::OrderedMultiDict;
 
 use crate::parser::{StreamableJSONReaderCallback, StreamableJSONReaderEvent,StreamableJSONReaderCallbackReturn} ;
-
-#[derive(Debug, PartialEq)]
-pub enum StreamableJSONEntry {
-    Object(OrderedMultiDict<StreamableJSONEntry, StreamableJSONEntry>), // key, value
-    Array(Vec<StreamableJSONEntry>),
-    String(String),
-    Constant(String),
-    Type(String, Vec<StreamableJSONEntry>),
-    Id(Option<Box<StreamableJSONEntry>>)
-}
+use crate::StreamableJSONEntry;
 
 struct OrderMultiDictDeserializer {
     stack: Vec<StreamableJSONEntry>,

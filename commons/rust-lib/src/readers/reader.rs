@@ -20,7 +20,7 @@ pub trait Readable<T> {
 
 pub struct CursedBufferReadable<T> {
     reader: CursedBufferReader<T>,
-    current_chunk: Option<Arc<Box<[T]>>>,
+    current_chunk: Option<Arc<Vec<T>>>,
     current_chunk_pos: usize,
     current_chunk_len: usize,
 }
@@ -37,7 +37,7 @@ impl<T> CursedBufferReadable<T> {
 }
 
 pub struct ReadableChunk<T> {
-    chunk: Arc<Box<[T]>>,
+    chunk: Arc<Vec<T>>,
     pos: usize,
     len: usize
 }
@@ -156,7 +156,7 @@ impl<T> Readable<T> for IteratorReadable<T> where T: Copy {
             None => return Err(ReaderError::EOF),
             Some(v) => {
                 Ok(ReadableChunk {
-                    chunk: Arc::new(Box::new([v])),
+                    chunk: Arc::new(vec![v]),
                     pos: 0,
                     len: 1
                 })
@@ -182,7 +182,7 @@ mod tests {
     fn test_cursedbuffer_readable1() {
 
         let buffer = CursedBuffer::<u8>::new();
-        buffer.write(Box::new([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])).unwrap();
+        buffer.write(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]).unwrap();
         let reader = buffer.reader(0);
         let mut readable = CursedBufferReadable::new(reader);
 
@@ -199,7 +199,7 @@ mod tests {
     fn test_cursedbuffer_readable2() {
 
         let buffer = CursedBuffer::<u8>::new();
-        buffer.write(Box::new([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])).unwrap();
+        buffer.write(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]).unwrap();
         let reader = buffer.reader(0);
         let mut readable = CursedBufferReadable::new(reader);
 
@@ -215,12 +215,12 @@ mod tests {
     fn test_cursedbuffer_readable3() {
 
         let buffer = CursedBuffer::<u8>::new();
-        buffer.write(Box::new([1, 2])).unwrap();
+        buffer.write(vec![1, 2]).unwrap();
         let reader = buffer.reader(0);
         let mut readable = CursedBufferReadable::new(reader);
 
         readable.skip(2).unwrap();
-        buffer.write(Box::new([3, 4, 5, 6, 7, 8, 9, 10])).unwrap();
+        buffer.write(vec![3, 4, 5, 6, 7, 8, 9, 10]).unwrap();
 
         assert_eq!(readable.read_next().unwrap(), 3);
         let b = readable.read_chunk().unwrap();

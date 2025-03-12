@@ -8,6 +8,26 @@ pub struct OrderedMultiDict<K, V> {
     keys: Vec<K>
 }
 
+pub struct OrderedMultiDictIterator<'a,K,V> {
+    dict: &'a OrderedMultiDict<K,V>,
+    current: usize
+}
+impl<'a,K,V> Iterator for OrderedMultiDictIterator<'a, K,V> {
+    // We can refer to this type using Self::Item
+    type Item = (&'a K,&'a V);
+
+    //TODO: this might suffer if the Dict is changed while the iterator is alive
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current<self.dict.entries.len() {
+            let r = (self.dict.keys.get(self.current).unwrap(),self.dict.entries.get(self.current).unwrap());
+            self.current += 1;
+            Some(r)
+        } else {
+            None
+        }
+    }
+}
+
 impl<K,V> OrderedMultiDict<K,V> {
     pub fn new() -> OrderedMultiDict<K,V> {
         OrderedMultiDict {
@@ -40,8 +60,12 @@ impl<K,V> OrderedMultiDict<K,V> {
         }
     }
 
-    fn length(&self) -> usize {
+    pub fn length(&self) -> usize {
         self.entries.len()
+    }
+
+    pub fn iter(&self) -> OrderedMultiDictIterator<K,V> {
+        OrderedMultiDictIterator { dict: &self, current: 0 }
     }
 
 }

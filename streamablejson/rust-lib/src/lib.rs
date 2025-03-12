@@ -1,27 +1,15 @@
 pub mod parser;
 pub mod deserializer;
+pub mod serializer;
 
-pub struct JsonStreamReader {
-}
+use dataflowgrid_commons::ordered_multi_dict::OrderedMultiDict;
 
-impl JsonStreamReader {
-    pub fn new() -> JsonStreamReader {
-        JsonStreamReader {}
-    }
-
-    pub async fn read(&self, mut c: impl AsyncFnMut()) -> String {
-        c().await;
-        "Hello, World!".to_string()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn it_works() {
-        let result = JsonStreamReader::new().read(|| async { println!("Hello")}).await;
-        assert_eq!(result, "Hello, World!");
-    }
+#[derive(Debug, PartialEq)]
+pub enum StreamableJSONEntry {
+    Object(OrderedMultiDict<StreamableJSONEntry, StreamableJSONEntry>), // key, value
+    Array(Vec<StreamableJSONEntry>),
+    String(String),
+    Constant(String),
+    Type(String, Vec<StreamableJSONEntry>),
+    Id(Option<Box<StreamableJSONEntry>>)
 }

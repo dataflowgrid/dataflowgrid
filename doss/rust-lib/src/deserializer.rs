@@ -55,7 +55,7 @@ impl DossLowLevelStream for DossLowLevelStreamConsoleImpl {
 }
 
 struct Deserializer<'a> {
-    dict: BTreeMap<usize, OrderedMultiDictEntry<'a>>
+    dict: BTreeMap<usize, &'a str>
 }
 
 impl<'a> Deserializer<'a> {
