@@ -41,6 +41,15 @@ impl<K,V> OrderedMultiDict<K,V> {
         self.entries.push(value);
     }
 
+    pub fn last_entry(&self) -> Option<&V> {
+        self.entries.last()
+    }
+
+    pub fn replace_last_entry(&mut self, value: V) {
+        self.entries.pop();
+        self.entries.push(value);
+    }
+
     pub fn get(&self, key: K ) -> Option<&V> where K: PartialEq {
         let index = self.keys.iter().position(|x| *x == key);
         match index {

@@ -1,0 +1,13 @@
+[package]
+name = "streamablejson-macros"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "1.0.40"
+streamablejson = { path = "../rust-lib" }
+proc-macro2 = {version="1"}
+dataflowgrid-commons = { path = "../../commons/rust-lib" }

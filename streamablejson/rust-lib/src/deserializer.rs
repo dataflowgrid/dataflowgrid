@@ -1,11 +1,15 @@
 /* This file is part of dataFlowGrid. See file LICENSE for full license details. (c) 2025 Alexander Zich */
+#![allow(dead_code)]
+use std::str::Chars;
 
 use dataflowgrid_commons::ordered_multi_dict::OrderedMultiDict;
+use dataflowgrid_commons::readers::reader::IteratorReadable;
+use crate::parser::StreamableJSONReader;
 
-use crate::parser::{StreamableJSONReaderCallback, StreamableJSONReaderEvent,StreamableJSONReaderCallbackReturn} ;
+use crate::parser::{StreamableJSONReaderCallback, StreamableJSONReaderCallbackReturn, StreamableJSONReaderError, StreamableJSONReaderEvent} ;
 use crate::StreamableJSONEntry;
 
-struct OrderMultiDictDeserializer {
+pub struct OrderMultiDictDeserializer {
     stack: Vec<StreamableJSONEntry>,
 }
 
@@ -15,18 +19,19 @@ impl OrderMultiDictDeserializer {
             stack: Vec::new(),
         }
     }
-    pub fn result(&self) -> &Option<Box<StreamableJSONEntry>> {
-        match self.stack.first() {
-            Some(StreamableJSONEntry::Id(opt)) => 
-                opt,
-            _ => &None
+    pub fn result(mut self) -> StreamableJSONEntry {
+        let r =  self.stack.remove(0);
+        if let StreamableJSONEntry::Id(mut opt) = r {
+            let r = opt.take().unwrap();
+            return *r
+        } else {
+            unreachable!()
         }
     }
 }
 
 impl StreamableJSONReaderCallback for OrderMultiDictDeserializer {
     fn on_streamablejson_event(&mut self, event: StreamableJSONReaderEvent) -> StreamableJSONReaderCallbackReturn {
-        println!("{:?}", event);
         match event {
             StreamableJSONReaderEvent::StartObject => {
                         self.stack.push(StreamableJSONEntry::Object(OrderedMultiDict::new()));
@@ -69,7 +74,24 @@ impl StreamableJSONReaderCallback for OrderMultiDictDeserializer {
                     StreamableJSONEntry::Id(opt) => {
                         opt.replace(Box::new(StreamableJSONEntry::String(s)));
                     }
-                    _ => panic!("Expected array or id")
+                    StreamableJSONEntry::Object(opt) => {
+                        match opt.last_entry() {
+                            None => {
+                                //dict is empty, insert as new key
+                                opt.push(StreamableJSONEntry::String(s), StreamableJSONEntry::Id(None));
+                            }
+                            Some(StreamableJSONEntry::Id(None)) => {
+                                //this is the value
+                                opt.replace_last_entry(StreamableJSONEntry::String(s));
+                            }
+                            Some(StreamableJSONEntry::String(_)) => {
+                                //this is a new key
+                                opt.push(StreamableJSONEntry::String(s), StreamableJSONEntry::Id(None));
+                            }
+                            _ => panic!("Unexpected object state")
+                        }
+                    }
+                    _ => panic!("Expected array, object or id")
                 }
             }
             StreamableJSONReaderEvent::Constant(s) => {
@@ -84,9 +106,26 @@ impl StreamableJSONReaderCallback for OrderMultiDictDeserializer {
                     StreamableJSONEntry::Type(_, last) => {
                         last.push(StreamableJSONEntry::Constant(s));
                     }
-                    _ => panic!("Expected array or id")
-                }
+                    StreamableJSONEntry::Object(opt) => {
+                        match opt.last_entry() {
+                            None => {
+                                //dict is empty, insert as new key
+                                opt.push(StreamableJSONEntry::String(s), StreamableJSONEntry::Id(None));
+                            }
+                            Some(StreamableJSONEntry::Id(None)) => {
+                                //this is the value
+                                opt.replace_last_entry(StreamableJSONEntry::String(s));
+                            }
+                            Some(StreamableJSONEntry::String(_)) => {
+                                //this is a new key
+                                opt.push(StreamableJSONEntry::String(s), StreamableJSONEntry::Id(None));
+                            }
+                            _ => panic!("Unexpected object state")
+                        }
                     }
+                    _ => panic!("Expected array, type, object or id")
+                }
+            }
             StreamableJSONReaderEvent::StartType(s) => {
                         self.stack.push(StreamableJSONEntry::Type(s, Vec::new()));
                     }
@@ -103,8 +142,6 @@ impl StreamableJSONReaderCallback for OrderMultiDictDeserializer {
                             _ => panic!("Expected type")
                         }
                     }
-            StreamableJSONReaderEvent::MarkerKey => todo!(),
-            StreamableJSONReaderEvent::MarkerValue => todo!(),
             StreamableJSONReaderEvent::Finished => {
                 assert!(self.stack.len() == 1);
             },
@@ -117,11 +154,46 @@ impl StreamableJSONReaderCallback for OrderMultiDictDeserializer {
     }
 }
 
+pub fn deserialize_ordermultidict_from_string(text: String) -> Result<StreamableJSONEntry, StreamableJSONReaderError> {
+    let mut deserializer = OrderMultiDictDeserializer::new();
+    let mut reader = StreamableJSONReader::new(&mut deserializer);
+    let mut it = IteratorReadable::new(Box::new(StringCharIterator::new(text)));
+    reader.pushdata(&mut it).unwrap();
+    reader.finish().unwrap();
+
+    return Ok(deserializer.result());
+}
+
+pub struct StringCharIterator {
+    text: String,
+}
+
+impl Iterator for StringCharIterator {
+    type Item = char;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.text.is_empty() {
+            return None;
+        }
+        let c = self.text.remove(0);
+        return Some(c);
+    }
+}
+
+impl StringCharIterator {
+    pub fn new(text: String) -> Self {
+        StringCharIterator {
+            text,
+        }
+    }
+    pub fn chars(&self) -> Chars {
+        return self.text.chars()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::StreamableJSONReader;
-    use dataflowgrid_commons::readers::reader::IteratorReadable;
 
     #[test]
     fn test_ordermultidict_deserializer() {
@@ -129,8 +201,7 @@ mod tests {
         let mut reader = StreamableJSONReader::new(&mut deserializer);
         reader.pushdata(&mut IteratorReadable::new(Box::new("{}".chars()))).unwrap();
         reader.finish().unwrap();
-        println!("{:?}", deserializer.result());
-        assert_eq!(*deserializer.result().as_ref().unwrap().as_ref(), StreamableJSONEntry::Object(OrderedMultiDict::new()));
+        assert_eq!(deserializer.result(), StreamableJSONEntry::Object(OrderedMultiDict::new()));
     }
 
     #[test]
@@ -139,8 +210,7 @@ mod tests {
         let mut reader = StreamableJSONReader::new(&mut deserializer);
         reader.pushdata(&mut IteratorReadable::new(Box::new("\"abc\"".chars()))).unwrap();
         reader.finish().unwrap();
-        println!("{:?}", deserializer.result());
-        assert_eq!(*deserializer.result().as_ref().unwrap().as_ref(), StreamableJSONEntry::String(String::from("abc")));
+        assert_eq!(deserializer.result(), StreamableJSONEntry::String(String::from("abc")));
     }
 
     #[test]
@@ -149,8 +219,7 @@ mod tests {
         let mut reader = StreamableJSONReader::new(&mut deserializer);
         reader.pushdata(&mut IteratorReadable::new(Box::new("[1,2]".chars()))).unwrap();
         reader.finish().unwrap();
-        println!("{:?}", deserializer.result());
-        assert_eq!(*deserializer.result().as_ref().unwrap().as_ref(), 
+        assert_eq!(deserializer.result(), 
             StreamableJSONEntry::Array(
                 vec![StreamableJSONEntry::Constant("1".into()), 
                 StreamableJSONEntry::Constant("2".into())]));
@@ -162,8 +231,7 @@ mod tests {
         let mut reader = StreamableJSONReader::new(&mut deserializer);
         reader.pushdata(&mut IteratorReadable::new(Box::new("[1,[2,[\"3\"]]]".chars()))).unwrap();
         reader.finish().unwrap();
-        println!("{:?}", deserializer.result());
-        assert_eq!(*deserializer.result().as_ref().unwrap().as_ref(), 
+        assert_eq!(deserializer.result(), 
             StreamableJSONEntry::Array(
                 vec![StreamableJSONEntry::Constant("1".into()),
                      StreamableJSONEntry::Array(
@@ -178,8 +246,7 @@ mod tests {
         let mut reader = StreamableJSONReader::new(&mut deserializer);
         reader.pushdata(&mut IteratorReadable::new(Box::new("1(2)".chars()))).unwrap();
         reader.finish().unwrap();
-        println!("{:?}", deserializer.result());
-        assert_eq!(*deserializer.result().as_ref().unwrap().as_ref(), 
+        assert_eq!(deserializer.result(), 
             StreamableJSONEntry::Type(
                 "1".into(),
                 vec![StreamableJSONEntry::Constant("2".into())]

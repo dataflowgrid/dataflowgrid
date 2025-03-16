@@ -24,7 +24,7 @@ pub struct Reusable<T> {
     reusable_inner: *mut ReusableInner<T>
 }
 
-struct ReusableInner<T> {
+pub struct ReusableInner<T> {
     inner: T,
     strong_count: usize,
     weak_count: usize,

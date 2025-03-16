@@ -5,4 +5,4 @@ members = [
     "streamablejson/rust-lib",
     #"pg-doss/extension",
     "shoutout"
-    , "commons/rust-lib"]
+    , "commons/rust-lib", "elbow/rust-lib", "streamablejson/rust-macros"]

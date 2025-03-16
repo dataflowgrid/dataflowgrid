@@ -121,7 +121,7 @@ pub struct IteratorReadable<T> {
 }
 
 impl<T> IteratorReadable<T> {
-    pub fn new(iter: Box<dyn Iterator<Item=T>>) -> Self {
+    pub fn new(iter: Box<dyn Iterator<Item=T>>)  -> Self {
         IteratorReadable {
             iter,
             pos: 0,

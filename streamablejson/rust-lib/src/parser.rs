@@ -19,8 +19,6 @@ pub enum StreamableJSONReaderEvent {
     EndArray,
     String(String),
     Constant(String),
-    MarkerKey,
-    MarkerValue,
     StartType(String),
     EndType,
     Finished,
@@ -135,7 +133,6 @@ impl<'a> StreamableJSONReader<'a> {
                 }
             }
             reprocess_char = false;
-            println!("{:?}",c);
             if self.stack.is_empty() {
                 return Err(StreamableJSONReaderError::InvalidState);
             }
