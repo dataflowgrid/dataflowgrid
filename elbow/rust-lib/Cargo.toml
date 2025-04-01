@@ -10,4 +10,4 @@ http-body-util = "0.1"
 hyper-util = { version = "0.1", features = ["full"] }
 fastwebsockets = { version = "0.10", features = ["upgrade"] }
  
- 
+ dataflowgrid-commons = { version = "0.1", path = "../../commons/rust-lib" }

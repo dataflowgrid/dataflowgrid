@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
-use streamablejson::{deserializer::deserialize_ordermultidict_from_string, StreamableJSONEntry};
+use streamablejson::{deserializer::deserialize_orderedbag_from_string, StreamableJSONEntry};
 
 
 #[derive(Debug)]
@@ -18,7 +18,7 @@ fn token(entry: &StreamableJSONEntry) -> TokenStream {
             }).collect();
             quote! {
                 {
-                    let mut d = OrderedMultiDict::new();
+                    let mut d = OrderedBag::new();
                     #(#arr)*;
                     StreamableJSONEntry::Object(d)
                 }
@@ -43,9 +43,6 @@ fn token(entry: &StreamableJSONEntry) -> TokenStream {
                 }
             }
         StreamableJSONEntry::Type(_, items) => todo!(),
-        StreamableJSONEntry::Id(streamable_jsonentry) => {
-            token(streamable_jsonentry.as_ref().unwrap())
-        },
     }
 }
 
@@ -56,7 +53,7 @@ impl ToTokens for Wrapper {
         let tok = quote! {
             {
                 use streamablejson::StreamableJSONEntry;
-                use dataflowgrid_commons::ordered_multi_dict::OrderedMultiDict;
+                use dataflowgrid_commons::orderedbag::OrderedBag;
 
                 #s
             }
@@ -68,7 +65,7 @@ impl ToTokens for Wrapper {
 #[proc_macro]
 pub fn streamablejson(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let text: String = input.to_string();
-    let des = Wrapper(deserialize_ordermultidict_from_string(text).unwrap());
+    let des = Wrapper(deserialize_orderedbag_from_string(text).unwrap());
     quote! {
         #des
     }.into()

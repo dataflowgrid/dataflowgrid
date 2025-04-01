@@ -3,20 +3,20 @@
 #![allow(dead_code)]
 
 #[derive(PartialEq, Debug)]
-pub struct OrderedMultiDict<K, V> {
+pub struct OrderedBag<K, V> {
     entries: Vec<V>,
     keys: Vec<K>
 }
 
-pub struct OrderedMultiDictIterator<'a,K,V> {
-    dict: &'a OrderedMultiDict<K,V>,
+pub struct OrderedBagIterator<'a,K,V> {
+    dict: &'a OrderedBag<K,V>,
     current: usize
 }
-impl<'a,K,V> Iterator for OrderedMultiDictIterator<'a, K,V> {
+impl<'a,K,V> Iterator for OrderedBagIterator<'a, K,V> {
     // We can refer to this type using Self::Item
     type Item = (&'a K,&'a V);
 
-    //TODO: this might suffer if the Dict is changed while the iterator is alive
+    //TODO: this might suffer if the Bag is changed while the iterator is alive
     fn next(&mut self) -> Option<Self::Item> {
         if self.current<self.dict.entries.len() {
             let r = (self.dict.keys.get(self.current).unwrap(),self.dict.entries.get(self.current).unwrap());
@@ -28,9 +28,9 @@ impl<'a,K,V> Iterator for OrderedMultiDictIterator<'a, K,V> {
     }
 }
 
-impl<K,V> OrderedMultiDict<K,V> {
-    pub fn new() -> OrderedMultiDict<K,V> {
-        OrderedMultiDict {
+impl<K,V> OrderedBag<K,V> {
+    pub fn new() -> OrderedBag<K,V> {
+        OrderedBag {
             entries: Vec::new(),
             keys: Vec::new()
         }
@@ -41,15 +41,21 @@ impl<K,V> OrderedMultiDict<K,V> {
         self.entries.push(value);
     }
 
-    pub fn last_entry(&self) -> Option<&V> {
-        self.entries.last()
+    /// Inserts a key at the end of the list, but does not insert a value.
+    /// This is useful if the value to that key is not known yet, but the key is.
+    /// The user is responsible to keep track of which keys were inserted without values.
+    pub fn insert_key_only(&mut self, key: K) {
+        self.keys.push(key);
     }
 
-    pub fn replace_last_entry(&mut self, value: V) {
-        self.entries.pop();
+    pub fn insert_value_only(&mut self, value: V) {
         self.entries.push(value);
     }
 
+    pub fn keys_and_values_in_sync(&self) -> bool {
+        self.keys.len() == self.entries.len()
+    }
+    
     pub fn get(&self, key: K ) -> Option<&V> where K: PartialEq {
         let index = self.keys.iter().position(|x| *x == key);
         match index {
@@ -73,8 +79,8 @@ impl<K,V> OrderedMultiDict<K,V> {
         self.entries.len()
     }
 
-    pub fn iter(&self) -> OrderedMultiDictIterator<K,V> {
-        OrderedMultiDictIterator { dict: &self, current: 0 }
+    pub fn iter(&self) -> OrderedBagIterator<K,V> {
+        OrderedBagIterator { dict: &self, current: 0 }
     }
 
 }
@@ -89,7 +95,7 @@ mod tests {
         Decimal { int: usize},
         Null,
         List { list: Vec<OrderedMultiDictEntry<'a>>},
-        Dict { dict: OrderedMultiDict<&'a str, OrderedMultiDictEntry<'a>>},
+        Dict { dict: OrderedBag<&'a str, OrderedMultiDictEntry<'a>>},
         True,
         False,
         None //an entry that should not be there and should be ignored
@@ -97,13 +103,13 @@ mod tests {
     
     #[test]
     fn empty() {
-        let result = OrderedMultiDict::<&str, OrderedMultiDictEntry>::new();
+        let result = OrderedBag::<&str, OrderedMultiDictEntry>::new();
         assert_eq!(result.length(), 0);
     }
 
     #[test]
     fn insert_remove() {
-        let mut result = OrderedMultiDict::new();
+        let mut result = OrderedBag::new();
         result.push("key", OrderedMultiDictEntry::String { str: "value"});
         assert_eq!(result.length(), 1);
         assert_eq!(result.get("key").unwrap(), &OrderedMultiDictEntry::String { str: "value"});
@@ -115,7 +121,7 @@ mod tests {
 
     #[test]
     fn insert_empty_list() {
-        let mut result = OrderedMultiDict::new();
+        let mut result = OrderedBag::new();
         result.push("key", OrderedMultiDictEntry::List { list: Vec::new()});
         assert_eq!(result.length(), 1);
         assert_eq!(result.get("key").unwrap(), &OrderedMultiDictEntry::List { list: Vec::new()});

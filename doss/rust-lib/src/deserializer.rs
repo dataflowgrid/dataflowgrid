@@ -2,7 +2,7 @@
 
 use std::{collections::BTreeMap, io::Result};
 use tokio::io::AsyncReadExt;
-use dataflowgrid_commons::ordered_multi_dict::OrderedMultiDict;
+use dataflowgrid_commons::orderedbag::OrderedBag;
 
 #[derive(Debug)]
 pub enum DossLowLevelStreamEvent {

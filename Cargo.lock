@@ -167,6 +167,7 @@ dependencies = [
 name = "elbow"
 version = "0.1.0"
 dependencies = [
+ "dataflowgrid-commons",
  "fastwebsockets",
  "http-body-util",
  "hyper",

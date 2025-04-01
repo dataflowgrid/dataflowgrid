@@ -77,16 +77,6 @@ impl StreamableJSONSerializer {
                 }
                 output.write(vec![')'])?;
             }
-            StreamableJSONEntry::Id(opt) => {
-                match opt {
-                    Some(entry) => {
-                        self.serialize(entry, output)?;
-                    }
-                    None => {
-                        //nothing
-                    }
-                }
-            }
         }
         Ok(())
     }
@@ -115,7 +105,7 @@ impl StreamableJSONSerializer {
 
 #[cfg(test)]
 mod tests {
-    use dataflowgrid_commons::ordered_multi_dict::OrderedMultiDict;
+    use dataflowgrid_commons::orderedbag::OrderedBag;
 
     use super::*;
  
@@ -152,7 +142,7 @@ mod tests {
 
     #[test]
     fn test_object() {
-        let mut k = OrderedMultiDict::new();
+        let mut k = OrderedBag::new();
         k.push(StreamableJSONEntry::String("value2".to_string()), StreamableJSONEntry::Constant("value1".to_string()));
         k.push(StreamableJSONEntry::String("value2".to_string()), StreamableJSONEntry::Constant("value3".to_string()));
         let r = StreamableJSONSerializer::serialize_to_string(

@@ -3,13 +3,14 @@
 use std::{clone, fs::read, future, ops::{Deref, DerefMut}, rc::Rc, sync::{Arc, Mutex, Weak}};
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use derive_more::{Display, Error};
+use tokio::sync::Notify;
 
 
 //internal state structs
 
 enum Callback {
     None,
-    Function(Box<dyn Fn()>)
+    Function(Box<dyn Fn() + Send>)
 }
 
 impl Debug for Callback {
@@ -26,7 +27,8 @@ struct CursedBufferInternalState<T> {
     buffers: Vec<Arc<Vec<T>>>,
     is_closed: bool,
     all_readers: Vec<Option<CursedBufferReaderInternalState>>,
-    callback_function: Callback
+    callback_function: Callback,
+    notify_written_async: Arc<Notify>
 }
 
 #[derive(Debug)]
@@ -80,7 +82,8 @@ impl<T> CursedBuffer<T> {
             buffers: Vec::new(),
             all_readers: Vec::new(),
             is_closed: false,
-            callback_function: Callback::None
+            callback_function: Callback::None,
+            notify_written_async: Arc::new(Notify::new())
         };
         let bufferstate = Arc::new(Mutex::new(state));
         
@@ -89,12 +92,13 @@ impl<T> CursedBuffer<T> {
         }
     }
 
-    pub fn set_callback(&mut self, callback: Box<dyn Fn()>) {
+    /// Sets a callback function that will be called whenever some data is finally removed from the buffer
+    pub fn set_callback(&mut self, callback: Box<dyn Fn() + Send>) {
         let mut bufferstate = self.bufferstate.lock().unwrap();
         bufferstate.callback_function = Callback::Function(callback);
     }
 
-    pub fn close(&mut self) {
+    pub fn close(&self) {
         let mut bufferstate = self.bufferstate.lock().unwrap();
         bufferstate.is_closed = true;
     }
@@ -120,8 +124,14 @@ impl<T> CursedBuffer<T> {
             return Err(CursedBufferError::BufferClosed);
         }
         s.buffers.push(Arc::new(data));
+        s.notify_written_async.notify_waiters();
         Ok(())
     }
+
+    pub async fn awrite(&self, data: Vec<T>) -> Result<(), CursedBufferError> {
+        self.write(data)
+    }
+
 }
 
 impl<T> CursedBufferInternalState<T> {
@@ -204,6 +214,21 @@ impl<T> CursedBufferReader<T> {
         Ok(r)
     }
 
+    pub async fn anext_chunk(&self) -> Result<CursedChunk<T>, CursedBufferError> {
+        let n = self.bufferstate.lock().unwrap().notify_written_async.clone();
+        loop {
+            let n1 = n.notified();
+            let chunk = self.next_chunk();
+            match chunk {
+                Ok(chunk) => return Ok(chunk),
+                Err(CursedBufferError::NotEnoughData) => {
+                    n1.await
+                }
+                Err(e) => return Err(e)
+            }
+        }
+    }
+
 }
 
 
@@ -223,7 +248,7 @@ impl<'a,T> CursedChunk<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::{OnceCell, RefCell};
+    use std::{cell::{OnceCell, RefCell}, sync::RwLock};
 
     use super::*;
 
@@ -250,7 +275,7 @@ mod tests {
 
     #[test]
     fn test_close() {
-        let mut b = CursedBuffer::<u8>::new();
+        let b = CursedBuffer::<u8>::new();
         b.write(vec![1, 2, 3, 4, 5]).expect("");
         b.close();
         b.write(vec![1, 2, 3, 4, 5]).expect_err("");
@@ -259,16 +284,16 @@ mod tests {
     #[test]
     fn test_callback() {
         let mut b = CursedBuffer::<u8>::new();
-        let c = Arc::new(RefCell::<usize>::new(0));
+        let c = Arc::new(RwLock::<usize>::new(0));
         let c2 = c.clone();
         b.set_callback(Box::new(move || {
             println!("Callback called");
-            c2.replace(1);
+            *c2.write().unwrap().deref_mut() += 1;
         }));
         let _ = b.write(vec![1, 2, 3, 4, 5]);
         let r = b.reader(0);
         let x = r.next_chunk();
         println!("{:?}",x);
-        assert_eq!(c.take(), 1);
+        assert_eq!(*c.read().unwrap(), 1);
     }
 }
