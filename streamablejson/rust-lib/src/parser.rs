@@ -331,7 +331,32 @@ impl<'a> StreamableJSONReader<'a> {
     }
 
     pub fn finish(&mut self) -> Result<(), StreamableJSONReaderError> {
-        if self.stack.is_empty() {
+        if !self.stack.is_empty() {
+            match self.stack.pop().unwrap() {
+                StreamableJSONReaderStateEnum::INIT{..} => {
+                }
+                StreamableJSONReaderStateEnum::OBJECT { .. } => {
+                    return Err(StreamableJSONReaderError::InvalidJSON);
+                }
+                StreamableJSONReaderStateEnum::ARRAY => {
+                    return Err(StreamableJSONReaderError::InvalidJSON);
+                }
+                StreamableJSONReaderStateEnum::STRING{..} => {
+                    return Err(StreamableJSONReaderError::InvalidJSON);
+                }
+                StreamableJSONReaderStateEnum::CONSTANT{is_key} => {
+                    if !is_key {
+                        self.callback(StreamableJSONReaderEvent::Constant(String::from_iter(&self.chars)));
+                    } else {
+                        return Err(StreamableJSONReaderError::InvalidJSON);
+                    }
+                }
+                StreamableJSONReaderStateEnum::TYPE => {
+                    return Err(StreamableJSONReaderError::InvalidJSON);
+                }
+            }
+        }
+        if self.stack.len() >1 {
             return Err(StreamableJSONReaderError::InvalidState);
         }
         self.callback(StreamableJSONReaderEvent::Finished);

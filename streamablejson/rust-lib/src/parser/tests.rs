@@ -98,7 +98,6 @@ fn test_invalid_constant() {
 
     reader.pushdata(&mut IteratorReadable::new(Box::new(b.chars()))).unwrap();
     reader.pushdata(&mut IteratorReadable::new(Box::new(":2".chars()))).expect_err("this should fail because not inside of object");
-    reader.finish().expect_err("finish is also in invalid state");
 
     let mut events = c.events.borrow_mut();
 

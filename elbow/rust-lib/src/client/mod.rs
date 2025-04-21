@@ -89,14 +89,5 @@ Fut::Output: Send + 'static,
     }
 } 
 
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn it_works() {
-        let conn = ElbowConnection::connect("localhost:8080".to_string(), Box::new(|| {
-            println!("Callback called");
-        }));
-        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-    }
-}
+#[cfg(test)]
+mod tests;
