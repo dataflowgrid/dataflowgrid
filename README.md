@@ -1,5 +1,16 @@
 # DataFlowGrid - Rethinking data management
 
+The current way for handling data (especially big data) is fundamentally on the wrong track
+because it puts spotlight on the provider side. Once the focus
+switches to the consumer side many opportunities for better
+data handling appear.
+
+This project is planned as a reference implementation of the 2 patents:
+- [Big data file management](https://register.dpma.de/DPMAregister/pat/register?AKZ=1020242021423)
+- [distributed scheduling for data management](https://register.dpma.de/DPMAregister/pat/register?AKZ=1020242021563)
+
+Several supplementary (non-patented) technology parts are developed as well.
+
 ## Main components
 
 - JsonStream - stream processing for JSON structures
