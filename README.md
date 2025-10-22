@@ -27,6 +27,8 @@ A library to efficiently (de)serialize data which is represented as a dictionary
 
 - [AgentQ](agentq/README.md) - a message server that distributes to several Process Server but only one per Agent at the same time
 
+-  [Toor](toor/README.md) - a Token Orchestrator
+
 - Enstate - a document database keeping track of changes per entity
 
 - GridProxy - local proxy to optimize data access
